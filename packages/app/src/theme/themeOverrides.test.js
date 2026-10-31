@@ -47,11 +47,11 @@ describe('buildThemeOverrideCss', () => {
 	it('carries theme fonts as far as the wrapper that names its own', () => {
 		const eightbit = buildThemeOverrideCss(resolveThemeById('8bit_hero'));
 		expect(eightbit).toContain('.sandstone-theme');
-		expect(eightbit).toContain("font-family: 'EightBitHero', sans-serif;");
+		expect(eightbit).toContain("font-family: 'Moonfin CJK', 'EightBitHero', sans-serif;");
 		// Neon Pulse saves its display face for titles and reads body copy in the
 		// condensed companion.
 		const neon = buildThemeOverrideCss(resolveThemeById('neon_pulse'));
-		expect(neon).toContain("font-family: 'NeonPulseBody', sans-serif; letter-spacing: 0.6px;");
+		expect(neon).toContain("font-family: 'Moonfin CJK', 'NeonPulseBody', sans-serif; letter-spacing: 0.6px;");
 		const moonfin = buildThemeOverrideCss(resolveThemeById('moonfin'));
 		expect(moonfin).not.toContain('font-family');
 	});

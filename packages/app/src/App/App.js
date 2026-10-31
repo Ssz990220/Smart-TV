@@ -103,6 +103,7 @@ const GamePlayer = lazy(() => import('../views/GamePlayer'));
 const SetupWizard = lazy(() => import('../views/SetupWizard'));
 
 import '../styles/perf-overrides.less';
+import '../styles/cjk-fonts.less';
 import css from './App.module.less';
 
 const MAX_HISTORY_LENGTH = 10;

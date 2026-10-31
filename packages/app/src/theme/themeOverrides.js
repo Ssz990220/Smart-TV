@@ -173,7 +173,7 @@ export const buildThemeOverrideCss = (theme, options = {}) => {
 		// the one they sit in.
 		rule(
 			'body, #root, .sandstone-theme, button, input, select, textarea',
-			`font-family: '${bodyFont}', sans-serif;${spacing}`
+			`font-family: 'Moonfin CJK', '${bodyFont}', sans-serif;${spacing}`
 		);
 	}
 
@@ -201,12 +201,12 @@ export const buildThemeOverrideCss = (theme, options = {}) => {
 		const notClean = `.${settingsCss.viewContainer}:not(.${settingsCss.cleanType})`;
 		rule(
 			`.${settingsCss.viewContainer}, .${settingsCss.viewContainer} button, .${settingsCss.viewContainer} input, .${settingsCss.dialogBarrier}`,
-			`font-family: 'Roboto', sans-serif; letter-spacing: normal;`
+			`font-family: 'Moonfin CJK', 'Roboto', sans-serif; letter-spacing: normal;`
 		);
-		rule(`${notClean} .${settingsCss.appBarTitle}`, `font-family: '${theme.fontFamily}', sans-serif;`);
+		rule(`${notClean} .${settingsCss.appBarTitle}`, `font-family: 'Moonfin CJK', '${theme.fontFamily}', sans-serif;`);
 		rule(
 			`${notClean} .${settingsCss.sectionTitle}, ${notClean} .${settingsCss.valueBubble}, .${settingsCss.searchInput}, .${settingsCss.searchInput} input`,
-			`font-family: '${bodyFace}', sans-serif;${isNeon ? ' letter-spacing: 0.6px;' : ''}`
+			`font-family: 'Moonfin CJK', '${bodyFace}', sans-serif;${isNeon ? ' letter-spacing: 0.6px;' : ''}`
 		);
 		if (isNeon) {
 			rule(`.${settingsCss.appBarTitle}`, `font-weight: 700; letter-spacing: 0.4px; color: ${accent}; text-shadow: ${textGlow};`);

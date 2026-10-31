@@ -5,6 +5,8 @@
  *   initAssCanvasRenderer (Tizen) - manual setCurrentTime() on a canvas
  */
 
+import cjkFallbackFont from '../../resources/fonts/NotoSansCJKsc-Regular.otf';
+
 // Worker files use ES6 arrows (Chrome 45+) and `let` in sloppy mode (Chrome 49+).
 // Gate support on actual worker/runtime capability instead of createImageBitmap.
 const getChromiumMajorVersion = () => {
@@ -42,7 +44,7 @@ const createRenderer = async (options, onError) => {
 			...options,
 			workerUrl,
 			legacyWorkerUrl: workerUrl.replace('worker.js', 'worker-legacy.js'),
-			fallbackFont: 'ass-fallback-font.ttf',
+			fallbackFont: cjkFallbackFont,
 			onError: onError || null,
 			...qualityOptions,
 			debug: false

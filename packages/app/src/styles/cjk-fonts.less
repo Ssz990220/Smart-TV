@@ -1,0 +1,38 @@
+// One offline font for the interface, text subtitles, and the ASS worker.
+// Limit this face to CJK so Latin themes and icon fonts retain their glyphs.
+@font-face {
+	font-family: 'Moonfin CJK';
+	src: url('../../resources/fonts/NotoSansCJKsc-Regular.otf') format('opentype');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+	unicode-range: U+2E80-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF, U+20000-323AF;
+}
+
+// Sandstone controls sometimes set their own family instead of inheriting the
+// app stack. Supply their CJK faces too, at every weight the controls request.
+.sandstone-cjk(@weight, @style: normal, @stretch: normal) {
+	@font-face {
+		font-family: 'Sandstone';
+		src: url('../../resources/fonts/NotoSansCJKsc-Regular.otf') format('opentype');
+		font-weight: @weight;
+		font-style: @style;
+		font-stretch: @stretch;
+		font-display: swap;
+		unicode-range: U+2E80-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF, U+20000-323AF;
+	}
+}
+.sandstone-cjk(300);
+.sandstone-cjk(400);
+.sandstone-cjk(500);
+.sandstone-cjk(600);
+.sandstone-cjk(700);
+
+.sandstone-cjk(300, italic);
+.sandstone-cjk(400, italic);
+.sandstone-cjk(600, italic);
+.sandstone-cjk(700, italic);
+.sandstone-cjk(300, normal, condensed);
+.sandstone-cjk(400, normal, condensed);
+.sandstone-cjk(600, normal, condensed);
+.sandstone-cjk(700, normal, condensed);

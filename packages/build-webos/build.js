@@ -178,15 +178,12 @@ try {
 	console.log('\n Copying book reader assets...');
 	copyReaderAssets(DIST_DIR, (msg) => console.log(`  ${msg}`));
 
-	// Copy fallback font for SubtitlesOctopus when ASS style fonts are unavailable.
-	const fallbackFontSrc = path.join(ROOT_DIR, 'node_modules', '@enact', 'sandstone', 'fonts', 'MuseoSans', 'MuseoSans-Light.ttf');
-	const fallbackFontDest = path.join(DIST_DIR, 'ass-fallback-font.ttf');
-	if (fs.existsSync(fallbackFontSrc)) {
-		fs.copyFileSync(fallbackFontSrc, fallbackFontDest);
-		console.log('  Copied ass-fallback-font.ttf (MuseoSans-Light)');
-	} else {
-		console.warn('  MuseoSans-Light.ttf not found; subtitle fallback font missing');
-	}
+	// Both CSS and libass import the same bundled CJK font. Keep its license
+	// alongside the application; never silently ship a Latin-only fallback.
+	const cjkFont = path.join(APP_DIR, 'resources', 'fonts', 'NotoSansCJKsc-Regular.otf');
+	const cjkLicense = path.join(APP_DIR, 'resources', 'fonts', 'NotoSansCJK-OFL.txt');
+	if (!fs.existsSync(cjkFont) || !fs.existsSync(cjkLicense)) throw new Error('Bundled CJK font/license missing');
+	fs.copyFileSync(cjkLicense, path.join(DIST_DIR, 'NotoSansCJK-OFL.txt'));
 
 	// Prune ilib locale data; keeps only plurals.json and localeinfo.json.
 	// for configured locales, removing ~5.5 MB of unused formatting data.
