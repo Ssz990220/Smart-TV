@@ -13,17 +13,25 @@
     UNSUPPORTED_DOWNLOAD_HOST: '字幕源返回了暂不支持的下载地址，请从网站下载后导入。'
   };
   const message = text => { $('message').textContent = text; };
+  let currentItem = '', previousTitle = '', approved = false;
   const api = async (route, method = 'GET', data, extra) => {
-    const response = await fetch(route, {method, headers: {Authorization: 'Bearer ' + token, ...(data && !(data instanceof File) ? {'Content-Type': 'application/json'} : {}), ...extra}, body: data instanceof File ? data : data ? JSON.stringify(data) : undefined});
+    const response = await fetch(route, {method, credentials: 'same-origin', headers: {...(token ? {Authorization: 'Bearer ' + token} : {}), ...(currentItem ? {'X-Moonfin-Item': currentItem} : {}), ...(data && !(data instanceof File) ? {'Content-Type': 'application/json'} : {}), ...extra}, body: data instanceof File ? data : data ? JSON.stringify(data) : undefined});
     const result = await response.json();
-    if (!response.ok) throw new Error(errors[result.error] || '操作失败，请稍后重试。');
+    if (!response.ok) {
+      if (response.status === 401) { approved = false; $('workspace').hidden = true; $('pairing').hidden = false; }
+      if (result.error === 'VIDEO_CHANGED') { await refresh(); throw new Error('电视已切换影片，请确认当前片名后重新上传或搜索。'); }
+      throw new Error(errors[result.error] || '操作失败，请稍后重试。');
+    }
     return result;
   };
   let known = '';
   const refresh = async () => {
     const state = await api('/api/state');
+    if (currentItem && currentItem !== state.item) { $('results').replaceChildren(); known = ''; message('已同步到电视当前影片。请确认片名后选择字幕。'); }
+    currentItem = state.item;
     $('title').textContent = state.title;
-    if (!$('query').value) $('query').value = state.title;
+    if (!$('query').value || $('query').value === previousTitle) $('query').value = state.title;
+    previousTitle = state.title;
     $('configured').textContent = 'ASSRT：' + (state.configured.assrt ? '已配置' : '未配置') + '；OpenSubtitles：' + (state.configured.opensubtitles ? '已配置' : '未配置') + (state.configured.openLoggedIn ? '，已登录' : '，未登录');
     const stamp = state.files.map(f => f.id).join(',');
     if (stamp !== known) {
@@ -37,15 +45,28 @@
     }
   };
   const run = async fn => { try { await fn(); } catch (e) { message(e.message || '操作失败。'); } };
+  const checkPairing = async () => {
+    const state = token ? {state: 'approved'} : await api('/api/pair');
+    approved = state.state === 'approved';
+    $('workspace').hidden = !approved; $('pairing').hidden = approved;
+    $('connect').disabled = state.state === 'pending';
+    $('pairStatus').textContent = state.state === 'pending' ? '请在电视弹出的字幕面板选择“允许并记住此浏览器”。请求两分钟后过期。' : '首次连接请点击下方按钮，再在电视确认一次。以后 30 天内自动连接当前影片。';
+    if (approved) { await refresh(); message('已连接电视当前影片，可以直接上传字幕。'); }
+  };
+  $('connect').onclick = () => run(async () => {
+    const ua = navigator.userAgent;
+    const name = (/iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : '其他设备') + ' 浏览器';
+    await api('/api/pair', 'POST', {name}); await checkPairing();
+  });
   const download = async file => {
     message('正在下载到电视…'); await api('/api/download', 'POST', {id: file.id});
-    message('已保存到电视。电视字幕面板打开时会自动加载。'); await refresh();
+    message('已保存到电视，当前影片会自动加载。'); await refresh();
   };
   $('upload').onchange = () => run(async () => {
     const file = $('upload').files[0]; if (!file) return;
     if (file.size > 16 * 1024 * 1024) throw new Error(errors.FILE_TOO_LARGE);
     message('正在发送到电视…'); await api('/api/upload', 'PUT', file, {'X-Subtitle-Name': encodeURIComponent(file.name)});
-    $('upload').value = ''; message('已发送。电视字幕面板打开时会自动加载；压缩包请在电视选择字幕文件。'); await refresh();
+    $('upload').value = ''; message('已发送并等待电视加载；多文件压缩包会在电视弹出选择。'); await refresh();
   });
   $('search').onclick = () => run(async () => {
     $('search').disabled = true; $('results').replaceChildren(); message('正在搜索…');
@@ -73,6 +94,6 @@
   });
   $('logout').onclick = () => run(async () => { await api('/api/settings', 'POST', {logout: true}); message('已退出 OpenSubtitles 登录。'); await refresh(); });
   $('clear').onclick = () => run(async () => { await api('/api/settings', 'POST', {assrtToken: null, openApiKey: null, logout: true}); message('已清除密钥。'); await refresh(); });
-  run(async () => { await refresh(); message('已连接电视，可以导入字幕。'); });
-  setInterval(() => run(refresh), 5000);
+  run(checkPairing);
+  setInterval(() => run(approved ? refresh : checkPairing), 3000);
 })();

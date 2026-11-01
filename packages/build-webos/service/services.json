@@ -20,6 +20,11 @@
 					"name": "subtitlesStop",
 					"description": "Close the local subtitle import session",
 					"public": false
+				},
+				{
+					"name": "subtitlesPair",
+					"description": "Approve, deny or revoke paired subtitle browsers from the TV",
+					"public": false
 				}
 			]
 		}

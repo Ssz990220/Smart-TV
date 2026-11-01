@@ -10,7 +10,7 @@ import {openSubtitleFiles, decodeLocalSubtitle} from '../../utils/localSubtitleF
 import css from './LocalSubtitlePanel.module.less';
 
 const Button = Spottable('button');
-const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, onLoad, onClose}) => {
+const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, visible, onRequestOpen, onLoad, onClose}) => {
 	const [session, setSession] = useState(null);
 	const [state, setState] = useState(null);
 	const [provider, setProvider] = useState('assrt');
@@ -26,29 +26,38 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, onLoad, onClose}) =
 	const alive = useRef(true);
 	const entriesRef = useRef([]);
 	const qrRef = useRef(null);
-	useEffect(() => { if (session?.portalUrls?.[0]) drawQrCode(qrRef.current, session.portalUrls[0]); }, [session]);
+	const requestedRef = useRef(new Set());
+	const itemKey = localSubtitleItemKey(item, mediaSourceId, serverUrl);
+	const title = item?.Name || '字幕导入';
+	useEffect(() => { if (visible && session?.portalUrls?.[0]) drawQrCode(qrRef.current, session.portalUrls[0]); }, [session, visible]);
 
 	const generation = useRef(0);
 
 	useEffect(() => {
 		alive.current = true;
 		let active = true;
-		subtitleServiceCall('subtitlesStart', {itemKey: localSubtitleItemKey(item, mediaSourceId, serverUrl), title: item?.Name || '字幕导入'}).then(s => {
+		setChoices([]); setResults([]); setSession(null); setState(null);
+		const start = () => subtitleServiceCall('subtitlesStart', {itemKey, title});
+		start().then(s => {
 			if (!active) return;
 			knownRef.current = new Set(s.files.map(f => f.id));
-			setSession(s); setState(s); setMessage('可直接搜索下载，或用手机／Mac 打开配对链接发送字幕。');
+			setSession(s); setState(s); setMessage('手机／Mac 打开固定地址，首次在电视允许配对，以后自动连接当前影片。');
 		}).catch(() => { if (active) setMessage('无法启动字幕服务，请确认安装了完整的 webOS 修复版。'); });
+		const heartbeat = setInterval(() => { start().then(s => { if (active) setSession(s); }).catch(() => {}); }, 5 * 60 * 1000);
 		return () => {
 			active = false; alive.current = false;
+			clearInterval(heartbeat);
+			subtitleServiceCall('subtitlesStop', {itemKey}).catch(() => {});
 			generation.current++; // eslint-disable-line react-hooks/exhaustive-deps
 			archiveRef.current?.close();
 		};
-	}, [item, mediaSourceId, serverUrl]);
+	}, [itemKey, title]);
 
 	const applyEntry = useCallback(async entry => {
 		const text = decodeLocalSubtitle(await entry.read(), encoding);
 		if (!alive.current) return;
 		await onLoad({name: entry.name, text, format: /\.(ass|ssa)$/i.test(entry.name) ? 'ass' : 'text'});
+		archiveRef.current?.close(); archiveRef.current = null; entriesRef.current = [];
 	}, [encoding, onLoad]);
 
 	const applyFile = useCallback(async file => {
@@ -62,10 +71,10 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, onLoad, onClose}) =
 			if (!alive.current || current !== generation.current) { archive.close(); return; }
 			archiveRef.current?.close(); archiveRef.current = archive; entriesRef.current = archive.entries;
 			if (archive.entries.length === 1) await applyEntry(archive.entries[0]);
-			else { setChoices(archive.entries.map((e, i) => ({id: 'entry-' + i, name: e.name, entry: i}))); setMessage('请选择压缩包中的字幕。'); }
-		} catch (e) { if (alive.current) setMessage(e.message || '读取字幕失败。'); }
+			else { setChoices(archive.entries.map((e, i) => ({id: 'entry-' + i, name: e.name, entry: i}))); setMessage('请选择压缩包中的字幕。'); onRequestOpen(); }
+		} catch (e) { if (alive.current) { setMessage(e.message || '读取字幕失败。'); onRequestOpen(); } }
 		finally { loadingRef.current = false; if (alive.current) setBusy(false); }
-	}, [session, applyEntry]);
+	}, [session, applyEntry, onRequestOpen]);
 
 	useEffect(() => {
 		if (!session) return;
@@ -75,15 +84,27 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, onLoad, onClose}) =
 				const next = await localSubtitleRequest(session, '/api/state');
 				if (!active) return;
 				setState(next);
+				const pairing = next.pairingRequests?.find(p => !requestedRef.current.has(p.id));
+				if (pairing) { requestedRef.current.add(pairing.id); onRequestOpen(); }
 				const fresh = next.files.find(f => !knownRef.current.has(f.id));
 				if (fresh && !loadingRef.current) await applyFile(fresh);
 			} catch (e) { if (active) setMessage(e.message || '连接已断开，请重新打开面板。'); }
 		};
 		const timer = setInterval(poll, 2000);
 		return () => { active = false; clearInterval(timer); };
-	}, [session, applyFile]);
+	}, [session, applyFile, onRequestOpen]);
 
-	useEffect(() => { Spotlight.focus('local-subtitles-close'); }, []);
+	useEffect(() => { if (visible) Spotlight.focus('local-subtitles-close'); }, [visible]);
+	const answerPairing = useCallback(async e => {
+		setBusy(true);
+		try { await subtitleServiceCall('subtitlesPair', {id: e.currentTarget.dataset.id, allow: e.currentTarget.dataset.allow === 'yes'}); setState(await localSubtitleRequest(session, '/api/state')); }
+		catch { setMessage('配对请求已过期，请在浏览器重新连接。'); }
+		finally { setBusy(false); }
+	}, [session]);
+	const forgetDevices = useCallback(async () => {
+		try { await subtitleServiceCall('subtitlesPair', {forgetAll: true}); setState(await localSubtitleRequest(session, '/api/state')); setMessage('已清除浏览器配对。下次连接需要重新在电视允许。'); }
+		catch { setMessage('清除配对失败，请重试。'); }
+	}, [session]);
 	const search = useCallback(async () => {
 		if (!session) return;
 		setBusy(true); setResults([]); setChoices([]); setMessage('正在搜索字幕…');
@@ -136,6 +157,7 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, onLoad, onClose}) =
 		else download(c);
 	}, [choices, importUsb, applyEntry, download]);
 	const onPanelKeyDown = useCallback(e => { if (isBackKey(e)) { e.preventDefault(); e.stopPropagation(); onClose(); } }, [onClose]);
+	if (!visible) return null;
 	return (
 		<div className={css.backdrop} onKeyDown={onPanelKeyDown}>
 			<ModalContainer className={css.panel} spotlightId="localSubtitles-modal" data-modal="localSubtitles">
@@ -146,7 +168,8 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, onLoad, onClose}) =
 					<Button className={css.button} onClick={cycleEncoding}>编码：{encoding}</Button>
 				</div>
 				<p className={css.info}>{message}</p>
-				{session && <div><canvas className={css.qr} ref={qrRef} role="img" aria-label="扫码配对字幕导入页面" /><p className={css.info}>用同一 Wi-Fi 的手机／Mac 打开完整链接：可发送字幕、配置密钥，以及打开 SubHD／字幕库下载。</p><p className={css.url}>{session.portalUrls[0] || '未找到局域网地址，请检查电视网络。'}</p><p className={css.info}>配对 30 分钟后过期。上传后自动读取；压缩包会列出字幕供选择。</p></div>}
+				{session && <div><canvas className={css.qr} ref={qrRef} role="img" aria-label="扫码打开固定字幕地址" /><p className={css.info}>用同一 Wi-Fi 的手机／Mac 打开固定地址，无需复制 token。首次在电视允许浏览器配对，以后 30 天内自动连接当前影片。</p><p className={css.url}>{session.portalUrls[0] || '未找到局域网地址，请检查电视网络。'}</p><p className={css.info}>影片播放或暂停时均可上传，关闭此面板后仍会自动加载。切换影片时网页同步更新。</p></div>}
+				{state?.pairingRequests?.map(p => <div key={p.id}><h3>允许浏览器连接？</h3><p className={css.info}>{p.name} 请求上传字幕及配置字幕源。</p><Button className={css.button} disabled={busy} data-id={p.id} data-allow="yes" onClick={answerPairing}>允许并记住此浏览器</Button><Button className={css.button} disabled={busy} data-id={p.id} data-allow="no" onClick={answerPairing}>拒绝</Button></div>)}
 				<div className={css.row}>
 					<SpottableInput className={css.input} value={query} onChange={changeQuery} placeholder="中文或英文片名" spotlightId="local-subtitle-query" />
 					<Button className={css.button} disabled={busy || !session} onClick={search}>搜索字幕</Button>
@@ -158,6 +181,7 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, onLoad, onClose}) =
 					{results.map(r => <Button className={`${css.button} ${css.entry}`} key={r.id} disabled={busy} data-id={r.id} onClick={clickResult}>{r.name}<br /><small>{r.info}</small></Button>)}
 				</div>
 				{!!state?.files?.length && <div><h3>已保存在电视的字幕</h3><div className={css.list}>{state.files.map(f => <Button key={f.id} className={`${css.button} ${css.entry}`} disabled={busy} data-id={f.id} onClick={clickCached}>{f.name}</Button>)}</div></div>}
+				{!!state?.pairedDevices && <Button className={css.button} onClick={forgetDevices}>清除已配对浏览器（{state.pairedDevices}）</Button>}
 			</ModalContainer>
 		</div>
 	);

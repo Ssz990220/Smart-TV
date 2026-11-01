@@ -1,6 +1,6 @@
 {
 	"name": "org.moonfin.webos.service",
-	"version": "3.0.3",
+	"version": "3.0.4",
 	"description": "Moonfin secure network proxy and standalone local subtitle service",
 	"main": "service.js",
 	"private": true,

@@ -1,14 +1,14 @@
 {
   "id": "org.moonfin.webos",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "type": "web",
   "title": "Moonfin TV Subtitles",
-  "appDescription": "Personal Moonfin 3.0.3 fork: bundled CJK fonts, independent ASSRT/OpenSubtitles downloads, LAN/USB subtitle import, and browser-assisted SubHD/Zimuku sources",
+  "appDescription": "Personal Moonfin 3.0.4: fixed LAN subtitle address, remembered browser pairing, automatic current-video import, standalone providers and bundled CJK fonts",
   "iconUri": "https://raw.githubusercontent.com/Moonfin-Client/Smart-TV/main/packages/build-webos/webos-meta/icon-130.png",
   "sourceUrl": "https://github.com/Ssz990220/Smart-TV",
   "rootRequired": false,
-  "ipkUrl": "Moonfin_webOS_v3.0.3.ipk",
+  "ipkUrl": "Moonfin_webOS_v3.0.4.ipk",
   "ipkHash": {
-    "sha256": "cf496c60030920ff234f10e3ed9edc2a46f47e06bef81338a62a1388c2a7cfdd"
+    "sha256": "194795b574c3adabea68286822a809089d7b0e3494a307741235f172a64d8893"
   }
 }

@@ -1,4 +1,4 @@
-# Standalone TV subtitles (webOS 3.0.3 personal fork)
+# Standalone TV subtitles (webOS 3.0.4 personal fork)
 
 The TV fetches and renders these subtitles without an Emby/Jellyfin subtitle
 provider, subtitle-write permission, or server-side video transcoding.
@@ -6,10 +6,14 @@ The application ID remains `org.moonfin.webos`.
 
 ## Use
 
-1. Play a video, open Subtitles, then **电视在线字幕／本地导入**.
-2. Scan the locally generated QR code from a phone on the same LAN, or open the
-   displayed full pairing link on a Mac. The link expires after 30 minutes.
-3. Send an SRT/ASS/SSA/VTT file. The open TV panel loads it automatically.
+1. Play or pause a video in Moonfin. The subtitle service starts automatically.
+   Open **Subtitles → 电视在线字幕／本地导入** to see its address or QR code.
+2. Open `http://TV-IP:17832` on the same LAN. The address has no token or fragment.
+   On first use, request pairing in the browser and approve it in the TV popup.
+   The browser remembers approval for 30 days using an HttpOnly, SameSite=Strict
+   cookie. The TV panel can revoke remembered browsers.
+3. Send an SRT/ASS/SSA/VTT file. It loads into the current video automatically,
+   even with the TV subtitle panel closed. The page follows movie changes.
    ZIP/RAR/7z packages show a file picker when they contain several subtitles.
    USB imports scan `/tmp/usb` and `/media/removable` with bounded traversal.
 4. ASSRT/OpenSubtitles results can be downloaded and loaded directly on the TV.
@@ -32,14 +36,18 @@ The private application directory is `/media/internal/.moonfin-local-subtitles`
 (mode 0700; files 0600). It survives normal application upgrades. Passwords are
 used only for the OpenSubtitles HTTPS login; only the resulting token is saved.
 No API credentials are embedded in the IPK or returned by the status endpoint.
-Provider calls use verified HTTPS. Private pairing tokens travel in the URL
-fragment initially and in Authorization headers for requests, never query strings.
+Provider calls use verified HTTPS. The TV's private control token stays inside
+the application; it is not in the address or QR code. Browsers use a remembered
+cookie after TV approval. Only hashes of browser secrets are stored on disk.
 The portal is a LAN HTTP page and should only be used on a trusted local network.
 Use its clear-keys button to remove provider credentials.
 
-Uploads require the current pairing token, reject unrelated browser origins,
-use generated storage IDs instead of user paths, and are scoped to a server/item/
-media-source hash. Sessions rotate between items and expire after 30 minutes.
+Uploads require an approved browser or the private TV control token, reject
+unrelated browser origins and Host headers, use generated storage IDs instead
+of user paths, and are scoped to a server/item/media-source hash. A stale browser
+upload is rejected when its displayed movie no longer matches the TV's movie.
+Private TV tokens rotate between movies. Playback keeps the service alive;
+leaving the player stops it. A 30-minute watchdog also stops abandoned sessions.
 The service caps uploads at 16 MiB and its cache at 96 MiB / 120 files. Single
 extracted subtitle files are limited to 4 MiB; encrypted archives require manual
 extraction. Unsafe archive paths are discarded. Cache deletion removes only
@@ -71,3 +79,12 @@ confirmed Chinese glyphs displayed correctly. ZIP/RAR/7z imports all completed
 using the actual TV archive worker. USB scanning succeeded with no USB subtitles
 attached; importing a physical USB file was not exercised. Test imports were
 removed and the temporary subtitle track/session disabled after verification.
+
+Version 3.0.4 validation: nine HTTP integration tests cover browser approval,
+persistent/revocable cookies, movie changes, stale-upload rejection, origin/Host
+checks and existing providers. Playwright verified the plain URL, TV-approval
+simulation, remembered login on a second tab, current-movie synchronization,
+upload and fixture-provider download. The final installed LG C5 build resumed
+the same video after update; its service started automatically with the subtitle
+panel closed, showed only plain addresses, and preserved the existing browser
+approval. Real provider credentials were not used.

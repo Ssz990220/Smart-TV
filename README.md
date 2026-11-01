@@ -1,4 +1,4 @@
-> Personal fork: webOS 3.0.3 adds standalone ASSRT/OpenSubtitles, paired local subtitle import, USB import and offline Chinese fonts. See [TV subtitles](packages/build-webos/LOCAL-SUBTITLES.md). This is not an official Moonfin release.
+> Personal fork: webOS 3.0.4 adds standalone ASSRT/OpenSubtitles, fixed-address LAN subtitle import with remembered browser pairing, USB import and offline Chinese fonts. See [TV subtitles](packages/build-webos/LOCAL-SUBTITLES.md). This is not an official Moonfin release.
 
 <h1 align="center">Moonfin for Smart-TVs</h1>
 <h3 align="center">Premium Jellyfin, Emby and Plex client for webOS and Tizen TVs</h3>

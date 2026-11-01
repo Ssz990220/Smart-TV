@@ -11,6 +11,8 @@ const {URL} = require('url');
 const MAX_FILE = 16 * 1024 * 1024;
 const MAX_CACHE = 96 * 1024 * 1024;
 const SESSION_MS = 30 * 60 * 1000;
+const DEVICE_MS = 30 * 24 * 60 * 60 * 1000;
+const COOKIE = 'MoonfinSubtitleDevice';
 const EXTENSIONS = /\.(srt|ass|ssa|vtt|zip|rar|7z)$/i;
 const HOSTS = ['assrt.net', 'makedie.me', 'opensubtitles.com'];
 const fail = (code, status) => Object.assign(new Error(code), {code, status});
@@ -35,7 +37,7 @@ function fetchBytes(value, opts, ca, redirects) {
   return new Promise((resolve, reject) => {
     const request = https.request(u, {
       method: opts.method || 'GET',
-      headers: Object.assign({'User-Agent': 'Moonfin-LocalSubtitles v3.0.3', 'Accept-Encoding': 'identity'}, opts.headers),
+      headers: Object.assign({'User-Agent': 'Moonfin-LocalSubtitles v3.0.4', 'Accept-Encoding': 'identity'}, opts.headers),
       ...(ca && ca.length ? {ca} : {}),
       rejectUnauthorized: true
     }, response => {
@@ -74,6 +76,7 @@ function createManager(options) {
   const request = options.request || ((url, opts) => fetchBytes(url, opts, options.ca));
   let cfg = {};
   let files = [];
+  let devices = [];
   let server = null;
   let session = null;
   let timer = null;
@@ -81,6 +84,7 @@ function createManager(options) {
   const results = new Map();
   const candidateFiles = new Map();
   const usbFiles = new Map();
+  const pendingDevices = new Map();
   const privateWrite = (name, value) => {
     const tmp = path.join(dataDir, name + '.new');
     fs.writeFileSync(tmp, JSON.stringify(value), {mode: 0o600});
@@ -92,6 +96,10 @@ function createManager(options) {
     fs.chmodSync(dataDir, 0o700);
     try { cfg = JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8')); } catch (_) { cfg = {}; }
     try { files = JSON.parse(fs.readFileSync(path.join(dataDir, 'files.json'), 'utf8')); } catch (_) { files = []; }
+    try { devices = JSON.parse(fs.readFileSync(path.join(dataDir, 'devices.json'), 'utf8')); } catch (_) { devices = []; }
+    if (!Array.isArray(files)) files = [];
+    if (!Array.isArray(devices)) devices = [];
+    devices = devices.filter(d => /^[a-f0-9]{64}$/.test(d.hash) && d.expires > Date.now());
     files = files.filter(f => /^[a-f0-9]{36}$/.test(f.id) && fs.existsSync(path.join(dataDir, f.id)));
   };
   const flags = () => ({assrt: !!cfg.assrtToken, opensubtitles: !!cfg.openApiKey, openLoggedIn: !!cfg.openToken});
@@ -101,6 +109,21 @@ function createManager(options) {
   const requireSession = () => {
     if (!session || session.expires < Date.now()) throw fail('SESSION_EXPIRED', 401);
     return session;
+  };
+  const pending = () => {
+    for (const [key, p] of pendingDevices) if (p.expires <= Date.now()) pendingDevices.delete(key);
+    return [...pendingDevices.values()].map(p => ({id: p.id, name: p.name, expires: p.expires}));
+  };
+  const approveDevice = input => {
+    pending();
+    if (input.forgetAll) { devices = []; pendingDevices.clear(); privateWrite('devices.json', devices); return; }
+    const entry = [...pendingDevices.entries()].find(([, p]) => p.id === input.id);
+    if (!entry) throw fail('PAIRING_EXPIRED', 400);
+    pendingDevices.delete(entry[0]);
+    if (input.allow === true) {
+      devices = [...devices.filter(d => d.hash !== entry[0] && d.expires > Date.now()), {hash: entry[0], name: entry[1].name, expires: Date.now() + DEVICE_MS}].slice(-16);
+      privateWrite('devices.json', devices);
+    }
   };
   const store = (name, buffer, itemKey, source) => {
     name = safeName(name);
@@ -265,9 +288,10 @@ function createManager(options) {
     }));
     return addresses;
   };
-  const status = () => {
+  const status = (privateState = true) => {
     const s = requireSession();
-    return {configured: flags(), title: s.title, files: list(s.itemKey), expires: s.expires};
+    return {configured: flags(), title: s.title, item: itemHash(s.itemKey), files: list(s.itemKey), expires: s.expires,
+      ...(privateState ? {pairingRequests: pending(), pairedDevices: devices.filter(d => d.expires > Date.now()).length} : {})};
   };
   const body = (req, max) => new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
@@ -284,18 +308,40 @@ function createManager(options) {
       const route = new URL(req.url, 'http://localhost').pathname;
       const origin = req.headers.origin;
       const own = 'http://' + req.headers.host;
+      const host = new URL(own).hostname;
+      if (!['127.0.0.1', 'localhost', '[::1]', ...address()].includes(host)) throw fail('HOST_REJECTED', 403);
       if (origin && origin !== 'null' && origin !== own) throw fail('ORIGIN_REJECTED', 403);
       if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Subtitle-Name');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Subtitle-Name, X-Moonfin-Item');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
       if (req.method === 'OPTIONS') return respond(res, 204, '');
       if (route === '/' && req.method === 'GET') return respond(res, 200, fs.readFileSync(path.join(assetsDir, 'index.html')), 'text/html; charset=utf-8');
       if (route === '/portal.js' && req.method === 'GET') return respond(res, 200, fs.readFileSync(path.join(assetsDir, 'portal.js')), 'text/javascript; charset=utf-8');
       const s = requireSession();
+      const cookieValue = String(req.headers.cookie || '').split(';').map(c => c.trim()).find(c => c.startsWith(COOKIE + '='));
+      let deviceSecret = cookieValue ? cookieValue.slice(COOKIE.length + 1) : '';
+      if (!/^[a-f0-9]{72}$/.test(deviceSecret)) deviceSecret = '';
+      const deviceHash = deviceSecret ? digest(deviceSecret) : '';
+      const approved = devices.some(d => d.hash === deviceHash && d.expires > Date.now());
+      if (route === '/api/pair' && (req.method === 'GET' || req.method === 'POST')) {
+        pending();
+        if (approved) return respond(res, 200, {state: 'approved'});
+        if (req.method === 'GET') return respond(res, 200, {state: pendingDevices.has(deviceHash) ? 'pending' : 'unpaired'});
+        if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) throw fail('INVALID_REQUEST', 400);
+        const input = JSON.parse((await body(req, 1024)).toString('utf8'));
+        if (pendingDevices.has(deviceHash)) return respond(res, 200, {state: 'pending'});
+        if (pendingDevices.size >= 8) throw fail('PAIRING_BUSY', 429);
+        deviceSecret = id() + id();
+        pendingDevices.set(digest(deviceSecret), {id: id(), name: safeName(input.name || 'Browser').slice(0, 60), expires: Date.now() + 120000});
+        res.setHeader('Set-Cookie', COOKIE + '=' + deviceSecret + '; Path=/; Max-Age=' + DEVICE_MS / 1000 + '; HttpOnly; SameSite=Strict');
+        return respond(res, 200, {state: 'pending'});
+      }
       const supplied = String(req.headers.authorization || '').replace(/^Bearer /, '');
       const a = Buffer.from(supplied), b = Buffer.from(s.token);
-      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw fail('PAIRING_REQUIRED', 401);
-      if (route === '/api/state' && req.method === 'GET') return respond(res, 200, status());
+      const tv = a.length === b.length && crypto.timingSafeEqual(a, b);
+      if (!tv && !approved) throw fail('PAIRING_REQUIRED', 401);
+      if (!tv && ['POST', 'PUT', 'DELETE'].includes(req.method) && route !== '/api/settings' && req.headers['x-moonfin-item'] !== itemHash(s.itemKey)) throw fail('VIDEO_CHANGED', 409);
+      if (route === '/api/state' && req.method === 'GET') return respond(res, 200, status(tv));
       if (route === '/api/usb' && req.method === 'GET') return respond(res, 200, scanUsb());
       if (route === '/api/usb/import' && req.method === 'POST') {
         const p = JSON.parse((await body(req, 2048)).toString('utf8')); return respond(res, 200, importUsb(p.id, s.itemKey));
@@ -329,7 +375,7 @@ function createManager(options) {
   };
   const stop = () => {
     clearTimeout(timer); timer = null; session = null;
-    results.clear(); candidateFiles.clear();
+    results.clear(); candidateFiles.clear(); pendingDevices.clear();
     if (server) { server.close(); server = null; }
     if (options.onStop) options.onStop();
   };
@@ -344,12 +390,14 @@ function createManager(options) {
       if (options.onStart) options.onStart();
     }
     const same = session && session.expires > Date.now() && session.itemKey === input.itemKey;
+    if (!same) { results.clear(); candidateFiles.clear(); }
     session = {token: same ? session.token : id() + id(), itemKey: String(input.itemKey || ''), title: String(input.title || 'Subtitle import').slice(0, 240), expires: Date.now() + SESSION_MS};
     clearTimeout(timer); timer = setTimeout(stop, SESSION_MS); if (timer.unref) timer.unref();
     return {baseUrl: 'http://127.0.0.1:' + lastPort, token: session.token,
-      portalUrls: address().map(a => 'http://' + a + ':' + lastPort + '/#' + session.token), ...status()};
+      portalUrls: address().map(a => 'http://' + a + ':' + lastPort), ...status()};
   };
-  return {start, stop, status, configure, search, resolve, download, store, read, list, remove};
+  const stopItem = input => { if (!input.itemKey || (session && session.itemKey === input.itemKey)) stop(); };
+  return {start, stop, stopItem, status, approveDevice, configure, search, resolve, download, store, read, list, remove};
 }
 
 function register(service, options) {
@@ -361,6 +409,10 @@ function register(service, options) {
   service.register('subtitlesStart', message => {
     manager.start(message.payload || {}).then(data => message.respond({returnValue: true, ...data}), () => message.respond({returnValue: false, errorText: 'SUBTITLE_SERVICE_UNAVAILABLE'}));
   });
-  service.register('subtitlesStop', message => { manager.stop(); message.respond({returnValue: true}); });
+  service.register('subtitlesStop', message => { manager.stopItem(message.payload || {}); message.respond({returnValue: true}); });
+  service.register('subtitlesPair', message => {
+    try { manager.approveDevice(message.payload || {}); message.respond({returnValue: true}); }
+    catch (_) { message.respond({returnValue: false, errorText: 'PAIRING_EXPIRED'}); }
+  });
 }
 module.exports = {createManager, register, checkedUrl, fetchBytes, safeName, MAX_FILE};

@@ -196,6 +196,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	const [isSeeking, setIsSeeking] = useState(false);
 	const [seekPosition, setSeekPosition] = useState(0);
 	const [mediaSourceId, setMediaSourceId] = useState(null);
+	const [localSubtitlePlayback, setLocalSubtitlePlayback] = useState(null);
 	const {showBuffering, noteSeek} = useBufferingAnimation({
 		isBuffering,
 		isSeeking,
@@ -909,6 +910,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				prevItemIdRef.current = item.Id;
 			}
 			setIsLoading(true);
+			setLocalSubtitlePlayback(null);
 			// A video taking over from music opens on its own screen, not the music player's.
 			setIsAudioMode((wasAudio) => wasAudio && (item?.MediaType === 'Audio' || item?.Type === 'Audio'));
 			setError(null);
@@ -1038,6 +1040,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				setPlayMethod(result.playMethod);
 				setIsHdrContent(isHdrOutput(result.mediaSource, result.playMethod === playback.PlayMethod.Transcode));
 				setMediaSourceId(result.mediaSourceId);
+				setLocalSubtitlePlayback({itemId: item.Id, sourceId: result.mediaSourceId});
 				liveRecovery?.tuned();
 				setVideoDisplayAspectRatio(getVideoDisplayAspectRatio(result.mediaSource));
 				playSessionRef.current = result.playSessionId;
@@ -3512,7 +3515,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				/>
 			)}
 
-			{activeModal === 'localSubtitles' && <LocalSubtitlePanel item={item} mediaSourceId={mediaSourceId} serverUrl={getServerUrl()} onLoad={loadLocalSubtitle} onClose={closeModal} />}
+			{mediaSourceId && localSubtitlePlayback?.itemId === item.Id && localSubtitlePlayback.sourceId === mediaSourceId && !error && !isAudioMode && <LocalSubtitlePanel item={item} mediaSourceId={mediaSourceId} serverUrl={getServerUrl()} visible={activeModal === 'localSubtitles'} onRequestOpen={handleOpenLocalSubtitles} onLoad={loadLocalSubtitle} onClose={closeModal} />}
 
 			{/* Custom Subtitle Overlay - webOS doesn't support native <track> elements */}
 			{!isLoading && !error && !isAudioMode && (

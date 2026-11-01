@@ -114,3 +114,71 @@ test('provider failures return codes, never provider response bodies or keys', a
     assert.deepEqual(await r.json(), {error: 'QUOTA_OR_RATE_LIMIT'});
   } finally { x.close(); }
 });
+
+test('fixed URL pairs through TV approval and follows movies without URL secrets', async () => {
+  const x = await fixture();
+  try {
+    assert.ok(x.session.portalUrls.every(url => !url.includes('#') && !url.includes('?')));
+    const pair = await fetch(x.session.baseUrl + '/api/pair', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: 'Test browser'})});
+    const cookie = pair.headers.get('set-cookie').split(';')[0];
+    assert.match(pair.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/);
+    assert.deepEqual(await pair.json(), {state: 'pending'});
+    const browser = (route, opts = {}) => fetch(x.session.baseUrl + route, {...opts, headers: {Cookie: cookie, ...opts.headers}});
+    assert.equal((await browser('/api/state')).status, 401);
+    const pending = x.manager.status().pairingRequests;
+    assert.equal(pending.length, 1);
+    x.manager.approveDevice({id: pending[0].id, allow: true});
+    const state = await (await browser('/api/state')).json();
+    assert.equal(state.title, '原创测试片');
+    assert.equal(state.pairingRequests, undefined);
+    const put = item => browser('/api/upload', {method: 'PUT', headers: {'X-Moonfin-Item': item, 'X-Subtitle-Name': 'original.srt'}, body: subtitle});
+    const file = await (await put(state.item)).json();
+    assert.ok(file.id);
+    await x.manager.start({itemKey: 'second-movie', title: 'Second original movie'});
+    const next = await (await browser('/api/state')).json();
+    assert.equal(next.title, 'Second original movie');
+    assert.notEqual(state.item, next.item);
+    assert.equal(next.files.length, 0);
+    assert.equal((await put(state.item)).status, 409);
+    assert.equal((await browser('/api/files/' + file.id)).status, 404);
+    assert.equal((await put(next.item)).status, 200);
+    x.manager.stopItem({itemKey: 'old-item-cleanup'});
+    assert.equal((await browser('/api/state')).status, 200);
+  } finally { x.close(); }
+});
+
+test('browser approval persists across restart and can be revoked from TV', async () => {
+  const x = await fixture();
+  try {
+    const r = await fetch(x.session.baseUrl + '/api/pair', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+    const cookie = r.headers.get('set-cookie').split(';')[0];
+    x.manager.approveDevice({id: x.manager.status().pairingRequests[0].id, allow: true});
+    const saved = fs.readFileSync(path.join(x.dataDir, 'devices.json'), 'utf8');
+    assert.ok(!saved.includes(cookie.split('=')[1]));
+    assert.equal(fs.statSync(path.join(x.dataDir, 'devices.json')).mode & 0o777, 0o600);
+    x.manager.stop();
+    const s = await x.manager.start({itemKey: 'new-session', title: 'Resumed original movie'});
+    const headers = {Cookie: cookie};
+    assert.deepEqual(await (await fetch(s.baseUrl + '/api/pair', {headers})).json(), {state: 'approved'});
+    assert.equal((await fetch(s.baseUrl + '/api/state', {headers})).status, 200);
+    x.manager.approveDevice({forgetAll: true});
+    assert.equal((await fetch(s.baseUrl + '/api/state', {headers})).status, 401);
+    assert.deepEqual(await (await fetch(s.baseUrl + '/api/pair', {headers})).json(), {state: 'unpaired'});
+  } finally { x.close(); }
+});
+
+test('unapproved browsers cannot pair cross-origin or through unrelated Host headers', async () => {
+  const x = await fixture();
+  try {
+    const r = await fetch(x.session.baseUrl + '/api/pair', {method: 'POST', headers: {'Content-Type': 'application/json', Origin: 'https://untrusted.example'}, body: '{}'});
+    assert.equal(r.status, 403);
+    const hostStatus = await new Promise((resolve, reject) => { const req = require('http').get(x.session.baseUrl + '/api/pair', {headers: {Host: 'untrusted.example'}}, r => { r.resume(); resolve(r.statusCode); }); req.on('error', reject); });
+    assert.equal(hostStatus, 403);
+    assert.equal((await fetch(x.session.baseUrl + '/api/pair', {method: 'POST', body: '{}'})).status, 400);
+    const request = await fetch(x.session.baseUrl + '/api/pair', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+    const cookie = request.headers.get('set-cookie').split(';')[0];
+    x.manager.approveDevice({id: x.manager.status().pairingRequests[0].id, allow: false});
+    assert.equal((await fetch(x.session.baseUrl + '/api/state', {headers: {Cookie: cookie}})).status, 401);
+    assert.equal(x.manager.status().pairedDevices, 0);
+  } finally { x.close(); }
+});
