@@ -198,6 +198,7 @@ const PlayerControls = ({
 	chapters,
 	currentTime,
 	subtitleOffset,
+	localSubtitleSaveMessage,
 	subtitleTrackEvents,
 	handleControlButtonClick,
 	handleProgressClick,
@@ -891,6 +892,7 @@ const PlayerControls = ({
 					subtitleTrackEvents={subtitleTrackEvents}
 					onClose={closeModal}
 					onOffsetChange={handleSubtitleOffsetChange}
+					saveMessage={localSubtitleSaveMessage}
 				/>
 			)}
 

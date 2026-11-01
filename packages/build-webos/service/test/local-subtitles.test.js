@@ -182,3 +182,69 @@ test('unapproved browsers cannot pair cross-origin or through unrelated Host hea
     assert.equal(x.manager.status().pairedDevices, 0);
   } finally { x.close(); }
 });
+
+test('local selection and per-file alignment survive service restart and remain item-scoped', async () => {
+  const x = await fixture();
+  const key = 'private-test-server:item:source';
+  try {
+    const a = x.manager.store('a.srt', subtitle, key, 'import');
+    const b = x.manager.store('b.srt', subtitle, key, 'import');
+    assert.equal(x.manager.preference(key).selection.fileId, b.id);
+    x.manager.updatePreference(key, {action: 'save', fileId: a.id, entry: a.name, encoding: 'gb18030', offsetSeconds: 2.3, select: true});
+    x.manager.updatePreference(key, {action: 'save', fileId: b.id, entry: b.name, offsetSeconds: -1.2, select: true});
+    const aAgain = x.manager.updatePreference(key, {action: 'save', fileId: a.id, entry: a.name, encoding: 'gb18030', select: true});
+    assert.equal(aAgain.track.offsetSeconds, 2.3);
+    assert.equal(aAgain.preference.selection.encoding, 'gb18030');
+    x.manager.stop();
+    // The last adjustment can land after leaving the HTTP session.
+    x.manager.updatePreference(key, {action: 'save', fileId: a.id, entry: a.name, offsetSeconds: 2.4});
+    const fresh = createManager({dataDir: x.dataDir, port: 0, bind: '127.0.0.1'});
+    try {
+      const restored = fresh.updatePreference(key, {action: 'get'}).preference;
+      assert.equal(restored.selection.fileId, a.id);
+      assert.equal(restored.selection.offsetSeconds, 2.4);
+      assert.equal(restored.selection.encoding, 'gb18030');
+      assert.equal(fresh.updatePreference('another-movie', {action: 'get'}).preference.selection, null);
+      assert.throws(() => fresh.updatePreference('another-movie', {action: 'save', fileId: a.id, select: true}), /FILE_NOT_FOUND/);
+    } finally { fresh.stop(); }
+    assert.equal(fs.statSync(path.join(x.dataDir, 'preferences.json')).mode & 0o777, 0o600);
+  } finally { x.close(); }
+});
+
+test('archive members have independent timing and selecting None preserves timing without auto-loading', async () => {
+  const x = await fixture();
+  const key = 'private-test-server:item:source';
+  try {
+    const zip = x.manager.store('pack.zip', Buffer.from('original archive fixture'), key, 'import');
+    x.manager.updatePreference(key, {action: 'save', fileId: zip.id, entry: 'zh/first.ass', encoding: 'utf-8', offsetSeconds: -3, select: true});
+    x.manager.updatePreference(key, {action: 'save', fileId: zip.id, entry: 'zh/second.srt', encoding: 'big5', offsetSeconds: 1.1, select: true});
+    x.manager.updatePreference(key, {action: 'save', enabled: false});
+    const disabled = x.manager.updatePreference(key, {action: 'get'}).preference;
+    assert.equal(disabled.enabled, false);
+    assert.equal(disabled.selection.entry, 'zh/second.srt');
+    assert.equal(disabled.selection.offsetSeconds, 1.1);
+    const first = x.manager.updatePreference(key, {action: 'save', fileId: zip.id, entry: 'zh/first.ass', encoding: 'utf-8', select: true});
+    assert.equal(first.preference.enabled, true);
+    assert.equal(first.track.offsetSeconds, -3);
+    assert.equal(first.preference.selection.entry, 'zh/first.ass');
+    assert.throws(() => x.manager.updatePreference(key, {action: 'save', fileId: zip.id, offsetSeconds: NaN}), /INVALID_OFFSET/);
+    assert.throws(() => x.manager.updatePreference(key, {action: 'save', fileId: zip.id, offsetSeconds: 86401}), /INVALID_OFFSET/);
+  } finally { x.close(); }
+});
+
+test('deleted preferred files fall back to another upload and pruning removes obsolete timing', async () => {
+  const x = await fixture();
+  const key = 'private-test-server:item:source';
+  try {
+    const uploaded = x.manager.store('upload.srt', subtitle, key, 'import');
+    x.manager.store('download.srt', subtitle, key, 'assrt');
+    assert.equal(x.manager.preference(key).selection.fileId, uploaded.id);
+    const selected = x.manager.store('selected.srt', subtitle, key, 'import');
+    x.manager.updatePreference(key, {action: 'save', fileId: selected.id, entry: selected.name, offsetSeconds: 0.5, select: true});
+    x.manager.remove(selected.id);
+    assert.equal(x.manager.preference(key).selection.fileId, uploaded.id);
+    assert.ok(!fs.readFileSync(path.join(x.dataDir, 'preferences.json'), 'utf8').includes(selected.id));
+    for (const f of x.manager.list(key)) x.manager.remove(f.id);
+    assert.equal(x.manager.preference(key).selection, null);
+  } finally { x.close(); }
+});

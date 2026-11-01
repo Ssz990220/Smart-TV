@@ -54,3 +54,12 @@ export const localSubtitleRequest = async (session, route, method = 'GET', data,
 
 export const localSubtitleItemKey = (item, mediaSourceId, fallbackServer = '') =>
 	JSON.stringify([item?._serverId || item?._serverUrl || fallbackServer, item?.Id || '', mediaSourceId || '']);
+
+// Keep rapid +/- presses ordered. Luna persists even if the player has already
+// stopped its HTTP session, so leaving immediately does not lose the last click.
+let preferenceQueue = Promise.resolve();
+export const localSubtitlePreference = payload => {
+	const next = preferenceQueue.then(() => subtitleServiceCall('subtitlesPreference', payload));
+	preferenceQueue = next.catch(() => {});
+	return next;
+};

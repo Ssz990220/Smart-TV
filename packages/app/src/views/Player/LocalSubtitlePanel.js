@@ -10,7 +10,7 @@ import {openSubtitleFiles, decodeLocalSubtitle} from '../../utils/localSubtitleF
 import css from './LocalSubtitlePanel.module.less';
 
 const Button = Spottable('button');
-const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, visible, onRequestOpen, onLoad, onClose}) => {
+const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, visible, allowRestore = true, onRequestOpen, onLoad, onClose}) => {
 	const [session, setSession] = useState(null);
 	const [state, setState] = useState(null);
 	const [provider, setProvider] = useState('assrt');
@@ -25,6 +25,8 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, visible, onRequestO
 	const knownRef = useRef(new Set());
 	const alive = useRef(true);
 	const entriesRef = useRef([]);
+	const fileRef = useRef(null);
+	const restoredRef = useRef(false);
 	const qrRef = useRef(null);
 	const requestedRef = useRef(new Set());
 	const itemKey = localSubtitleItemKey(item, mediaSourceId, serverUrl);
@@ -37,6 +39,7 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, visible, onRequestO
 		alive.current = true;
 		let active = true;
 		setChoices([]); setResults([]); setSession(null); setState(null);
+		restoredRef.current = false;
 		const start = () => subtitleServiceCall('subtitlesStart', {itemKey, title});
 		start().then(s => {
 			if (!active) return;
@@ -53,14 +56,16 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, visible, onRequestO
 		};
 	}, [itemKey, title]);
 
-	const applyEntry = useCallback(async entry => {
-		const text = decodeLocalSubtitle(await entry.read(), encoding);
+	const applyEntry = useCallback(async (entry, file, options = {}) => {
+		const codec = options.encoding || encoding;
+		const text = decodeLocalSubtitle(await entry.read(), codec);
 		if (!alive.current) return;
-		await onLoad({name: entry.name, text, format: /\.(ass|ssa)$/i.test(entry.name) ? 'ass' : 'text'});
+		await onLoad({name: entry.name, text, format: /\.(ass|ssa)$/i.test(entry.name) ? 'ass' : 'text', restore: !!options.restore,
+			local: {itemKey, fileId: file.id, entry: entry.name, encoding: codec}});
 		archiveRef.current?.close(); archiveRef.current = null; entriesRef.current = [];
-	}, [encoding, onLoad]);
+	}, [encoding, onLoad, itemKey]);
 
-	const applyFile = useCallback(async file => {
+	const applyFile = useCallback(async (file, options = {}) => {
 		if (!session || loadingRef.current) return;
 		loadingRef.current = true; setBusy(true); setMessage('正在读取字幕…');
 		const current = ++generation.current;
@@ -70,11 +75,22 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, visible, onRequestO
 			const archive = await openSubtitleFiles(file.name, bytes);
 			if (!alive.current || current !== generation.current) { archive.close(); return; }
 			archiveRef.current?.close(); archiveRef.current = archive; entriesRef.current = archive.entries;
-			if (archive.entries.length === 1) await applyEntry(archive.entries[0]);
+			fileRef.current = file;
+			if (options.encoding) setEncoding(options.encoding);
+			const savedEntry = options.entry && archive.entries.find(e => e.name === options.entry);
+			if (savedEntry || archive.entries.length === 1) await applyEntry(savedEntry || archive.entries[0], file, options);
 			else { setChoices(archive.entries.map((e, i) => ({id: 'entry-' + i, name: e.name, entry: i}))); setMessage('请选择压缩包中的字幕。'); onRequestOpen(); }
 		} catch (e) { if (alive.current) { setMessage(e.message || '读取字幕失败。'); onRequestOpen(); } }
 		finally { loadingRef.current = false; if (alive.current) setBusy(false); }
 	}, [session, applyEntry, onRequestOpen]);
+
+	useEffect(() => {
+		if (!session || !state || restoredRef.current) return;
+		restoredRef.current = true;
+		const selected = state.preference?.enabled !== false && state.preference?.selection;
+		const file = selected && state.files.find(f => f.id === selected.fileId);
+		if (allowRestore && file) applyFile(file, {...selected, restore: true});
+	}, [session, state, applyFile, allowRestore]);
 
 	useEffect(() => {
 		if (!session) return;
@@ -153,7 +169,7 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, visible, onRequestO
 		const c = choices.find(f => f.id === e.currentTarget.dataset.id);
 		if (!c) return;
 		if (c.usb) importUsb(c);
-		else if (c.entry !== undefined) applyEntry(entriesRef.current[c.entry]).catch(error => setMessage(error.message));
+		else if (c.entry !== undefined) applyEntry(entriesRef.current[c.entry], fileRef.current).catch(error => setMessage(error.message));
 		else download(c);
 	}, [choices, importUsb, applyEntry, download]);
 	const onPanelKeyDown = useCallback(e => { if (isBackKey(e)) { e.preventDefault(); e.stopPropagation(); onClose(); } }, [onClose]);
@@ -180,7 +196,7 @@ const LocalSubtitlePanel = ({item, mediaSourceId, serverUrl, visible, onRequestO
 					{choices.map(c => <Button className={`${css.button} ${css.entry}`} key={c.id} disabled={busy} data-id={c.id} onClick={clickChoice}>{c.name}</Button>)}
 					{results.map(r => <Button className={`${css.button} ${css.entry}`} key={r.id} disabled={busy} data-id={r.id} onClick={clickResult}>{r.name}<br /><small>{r.info}</small></Button>)}
 				</div>
-				{!!state?.files?.length && <div><h3>已保存在电视的字幕</h3><div className={css.list}>{state.files.map(f => <Button key={f.id} className={`${css.button} ${css.entry}`} disabled={busy} data-id={f.id} onClick={clickCached}>{f.name}</Button>)}</div></div>}
+				{!!state?.files?.length && <div><h3>已保存在电视的字幕</h3><p className={css.info}>记住每份字幕的对齐；下次优先加载上次选择的本地字幕。手动选无字幕或其他轨道后，将保留该选择。</p><div className={css.list}>{state.files.map(f => <Button key={f.id} className={`${css.button} ${css.entry}`} disabled={busy} data-id={f.id} onClick={clickCached}>{f.name}{state.preference?.enabled && state.preference?.selection?.fileId === f.id ? '（优先）' : ''}</Button>)}</div></div>}
 				{!!state?.pairedDevices && <Button className={css.button} onClick={forgetDevices}>清除已配对浏览器（{state.pairedDevices}）</Button>}
 			</ModalContainer>
 		</div>

@@ -37,7 +37,7 @@ function fetchBytes(value, opts, ca, redirects) {
   return new Promise((resolve, reject) => {
     const request = https.request(u, {
       method: opts.method || 'GET',
-      headers: Object.assign({'User-Agent': 'Moonfin-LocalSubtitles v3.0.4', 'Accept-Encoding': 'identity'}, opts.headers),
+      headers: Object.assign({'User-Agent': 'Moonfin-LocalSubtitles v3.0.5', 'Accept-Encoding': 'identity'}, opts.headers),
       ...(ca && ca.length ? {ca} : {}),
       rejectUnauthorized: true
     }, response => {
@@ -77,6 +77,7 @@ function createManager(options) {
   let cfg = {};
   let files = [];
   let devices = [];
+  let preferences = {};
   let server = null;
   let session = null;
   let timer = null;
@@ -97,6 +98,8 @@ function createManager(options) {
     try { cfg = JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8')); } catch (_) { cfg = {}; }
     try { files = JSON.parse(fs.readFileSync(path.join(dataDir, 'files.json'), 'utf8')); } catch (_) { files = []; }
     try { devices = JSON.parse(fs.readFileSync(path.join(dataDir, 'devices.json'), 'utf8')); } catch (_) { devices = []; }
+    try { preferences = JSON.parse(fs.readFileSync(path.join(dataDir, 'preferences.json'), 'utf8')); } catch (_) { preferences = {}; }
+    if (!preferences || Array.isArray(preferences) || typeof preferences !== 'object') preferences = {};
     if (!Array.isArray(files)) files = [];
     if (!Array.isArray(devices)) devices = [];
     devices = devices.filter(d => /^[a-f0-9]{64}$/.test(d.hash) && d.expires > Date.now());
@@ -106,6 +109,57 @@ function createManager(options) {
   const publicFile = f => ({id: f.id, name: f.name, bytes: f.bytes, source: f.source, created: f.created});
   const itemHash = key => digest(key || 'unassigned');
   const list = key => files.filter(f => f.item === itemHash(key)).map(publicFile);
+  const trackKey = (fileId, entry) => digest(JSON.stringify([fileId, entry]));
+  const preference = key => {
+    const pref = preferences[itemHash(key)] || {};
+    const available = list(key);
+    const selectedFile = pref.selected && available.find(f => f.id === pref.selected.fileId);
+    const fallback = [...available].reverse().find(f => f.source === 'import' || f.source === 'usb') || available[available.length - 1];
+    const selection = selectedFile ? pref.selected : fallback ? {fileId: fallback.id, encoding: 'auto'} : null;
+    const track = selection && pref.tracks && pref.tracks[trackKey(selection.fileId, selection.entry || '')];
+    return {enabled: pref.enabled !== false, selection: selection ? {...selection, offsetSeconds: track ? track.offsetSeconds : 0} : null};
+  };
+  const updatePreference = (key, input) => {
+    // Private Luna calls also work after the HTTP session closes, so the last
+    // offset queued while leaving playback is still persisted.
+    init();
+    const hash = itemHash(key);
+    const pref = preferences[hash] || {tracks: {}};
+    const tracks = pref.tracks || {};
+    let track = null;
+    if (input.fileId) {
+      const file = files.find(f => f.id === input.fileId && f.item === hash);
+      if (!file) throw fail('FILE_NOT_FOUND', 404);
+      const entry = String(input.entry || file.name).slice(0, 1024);
+      const encoding = input.encoding || 'auto';
+      if (!['auto', 'utf-8', 'gb18030', 'big5', 'utf-16le', 'utf-16be'].includes(encoding)) throw fail('INVALID_ENCODING', 400);
+      const index = trackKey(file.id, entry);
+      track = tracks[index] || {fileId: file.id, entry, encoding, offsetSeconds: 0};
+      if (input.action === 'save') {
+        if (input.offsetSeconds !== undefined && (!Number.isFinite(input.offsetSeconds) || Math.abs(input.offsetSeconds) > 86400)) throw fail('INVALID_OFFSET', 400);
+        track = {...track, encoding, ...(input.offsetSeconds !== undefined ? {offsetSeconds: input.offsetSeconds} : {})};
+        tracks[index] = track;
+        if (input.select === true) { pref.selected = {fileId: file.id, entry, encoding}; pref.enabled = true; }
+      }
+    }
+    if (input.action === 'save') {
+      if (typeof input.enabled === 'boolean') pref.enabled = input.enabled;
+      pref.tracks = tracks;
+      preferences[hash] = pref;
+      privateWrite('preferences.json', preferences);
+    }
+    return {preference: preference(key), track};
+  };
+  const prunePreferences = () => {
+    const valid = new Set(files.map(f => f.id));
+    const items = new Set(files.map(f => f.item));
+    for (const [key, pref] of Object.entries(preferences)) {
+      if (!items.has(key)) { delete preferences[key]; continue; }
+      if (pref.selected && !valid.has(pref.selected.fileId)) delete pref.selected;
+      for (const [track, value] of Object.entries(pref.tracks || {})) if (!valid.has(value.fileId)) delete pref.tracks[track];
+    }
+    privateWrite('preferences.json', preferences);
+  };
   const requireSession = () => {
     if (!session || session.expires < Date.now()) throw fail('SESSION_EXPIRED', 401);
     return session;
@@ -138,6 +192,7 @@ function createManager(options) {
       try { fs.unlinkSync(path.join(dataDir, old.id)); } catch (_) {}
     }
     privateWrite('files.json', files);
+    prunePreferences();
     return publicFile(file);
   };
   const read = fileId => {
@@ -148,7 +203,7 @@ function createManager(options) {
   const remove = fileId => {
     const file = files.find(f => f.id === fileId);
     if (file) { try { fs.unlinkSync(path.join(dataDir, file.id)); } catch (_) {} }
-    files = files.filter(f => f.id !== fileId); privateWrite('files.json', files);
+    files = files.filter(f => f.id !== fileId); privateWrite('files.json', files); prunePreferences();
   };
   const jsonRequest = async (url, opts) => {
     const r = await request(url, Object.assign({maxBytes: 2 * 1024 * 1024}, opts));
@@ -290,7 +345,7 @@ function createManager(options) {
   };
   const status = (privateState = true) => {
     const s = requireSession();
-    return {configured: flags(), title: s.title, item: itemHash(s.itemKey), files: list(s.itemKey), expires: s.expires,
+    return {configured: flags(), title: s.title, item: itemHash(s.itemKey), files: list(s.itemKey), preference: preference(s.itemKey), expires: s.expires,
       ...(privateState ? {pairingRequests: pending(), pairedDevices: devices.filter(d => d.expires > Date.now()).length} : {})};
   };
   const body = (req, max) => new Promise((resolve, reject) => {
@@ -397,7 +452,7 @@ function createManager(options) {
       portalUrls: address().map(a => 'http://' + a + ':' + lastPort), ...status()};
   };
   const stopItem = input => { if (!input.itemKey || (session && session.itemKey === input.itemKey)) stop(); };
-  return {start, stop, stopItem, status, approveDevice, configure, search, resolve, download, store, read, list, remove};
+  return {start, stop, stopItem, status, preference, updatePreference, approveDevice, configure, search, resolve, download, store, read, list, remove};
 }
 
 function register(service, options) {
@@ -413,6 +468,13 @@ function register(service, options) {
   service.register('subtitlesPair', message => {
     try { manager.approveDevice(message.payload || {}); message.respond({returnValue: true}); }
     catch (_) { message.respond({returnValue: false, errorText: 'PAIRING_EXPIRED'}); }
+  });
+  service.register('subtitlesPreference', message => {
+    try {
+      const input = message.payload || {};
+      if (!input.itemKey) throw fail('ITEM_REQUIRED');
+      message.respond({returnValue: true, ...manager.updatePreference(input.itemKey, input)});
+    } catch (_) { message.respond({returnValue: false, errorText: 'SUBTITLE_PREFERENCE_FAILED'}); }
   });
 }
 module.exports = {createManager, register, checkedUrl, fetchBytes, safeName, MAX_FILE};

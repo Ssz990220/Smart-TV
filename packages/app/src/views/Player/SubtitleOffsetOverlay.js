@@ -20,7 +20,7 @@ const OffsetContainer = SpotlightContainerDecorator({
 
 const stopPropagation = (e) => e.stopPropagation();
 
-const SubtitleOffsetOverlay = ({visible, currentOffset, currentTime, subtitleTrackEvents, onClose, onOffsetChange}) => {
+const SubtitleOffsetOverlay = ({visible, currentOffset, currentTime, subtitleTrackEvents, onClose, onOffsetChange, saveMessage}) => {
 	const timeline = useMemo(
 		() => (visible ? buildSubtitleTimeline(subtitleTrackEvents, currentTime, currentOffset) : null),
 		[visible, subtitleTrackEvents, currentTime, currentOffset]
@@ -71,6 +71,7 @@ const SubtitleOffsetOverlay = ({visible, currentOffset, currentTime, subtitleTra
 				spotlightId="offset-modal"
 			>
 				<h2 className={`${css.modalTitle} ${css.offsetTitle}`}>{$L('Subtitle Offset')}</h2>
+				{saveMessage && <p role="status">{saveMessage}</p>}
 				<div className={css.offsetControls}>
 					<SpottableButton
 						className={css.offsetBtn}

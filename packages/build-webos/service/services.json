@@ -25,6 +25,11 @@
 					"name": "subtitlesPair",
 					"description": "Approve, deny or revoke paired subtitle browsers from the TV",
 					"public": false
+				},
+				{
+					"name": "subtitlesPreference",
+					"description": "Remember local subtitle selection, archive entry, encoding and per-track timing",
+					"public": false
 				}
 			]
 		}

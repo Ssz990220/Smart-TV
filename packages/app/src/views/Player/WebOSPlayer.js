@@ -1,6 +1,7 @@
 import LocalSubtitlePanel from './LocalSubtitlePanel';
 import {escapeLocalSubtitleText} from '../../utils/localSubtitleFiles';
 import {parseSubtitleText} from '../../utils/subtitleText';
+import {localSubtitleItemKey, localSubtitlePreference} from '../../services/localSubtitles';
 import {useState, useEffect, useCallback, useRef, useMemo} from 'react';
 import Spotlight from '@enact/spotlight';
 import Button from '@enact/sandstone/Button';
@@ -179,6 +180,9 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	const [subtitleOffset, setSubtitleOffset] = useState(0);
 	const subtitleOffsetRef = useRef(0);
 	subtitleOffsetRef.current = subtitleOffset;
+	const [localSubtitleSaveMessage, setLocalSubtitleSaveMessage] = useState('');
+	const localSubtitleSaveGenRef = useRef(0);
+	const localSubtitleUserChoiceRef = useRef(false);
 	const {loading: subtitleFetching, track: trackSubtitleFetch, clear: clearSubtitleFetch} = useSubtitleFetch();
 	const [controlsVisible, setControlsVisible] = useState(false);
 	const [activeModal, setActiveModal] = useState(null);
@@ -926,6 +930,10 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 			setCurrentSubtitleText(null);
 			setSelectedSubtitleIndex(-1);
 			localSubtitleRef.current = null;
+			localSubtitleUserChoiceRef.current = false;
+			localSubtitleSaveGenRef.current++;
+			setLocalSubtitleSaveMessage('');
+			subtitleOffsetRef.current = 0; setSubtitleOffset(0);
 			clearSubtitleFetch();
 			prepareSecondaryForItem(item.Id);
 			setVideoDisplayAspectRatio(null);
@@ -1018,7 +1026,19 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				// The subtitle track has to be settled before the url reaches the video
 				// element, because a burn in one needs the stream negotiated again and
 				// swapping the source afterwards would restart playback.
-				const initialSubtitleChoice = await resolveInitialSubtitle(result, item, initialSubtitleIndex, settings, startingAudio);
+				let preferLocal = false;
+				if (initialSubtitleIndex == null || initialSubtitleIndex === -2) {
+					try {
+						const saved = await localSubtitlePreference({itemKey: localSubtitleItemKey(item, result.mediaSourceId, getServerUrl()), action: 'get'});
+						preferLocal = saved.preference?.enabled !== false && !!saved.preference?.selection;
+					} catch { /* Older services retain their normal subtitle behavior. */ }
+				}
+				if (preferLocal && playbackInfoOptions.subtitleStreamIndex !== -1) {
+					playbackInfoOptions.subtitleStreamIndex = -1;
+					playbackInfoOptions.mediaSourceId = result.mediaSourceId;
+					result = await playback.getPlaybackInfo(item.Id, playbackInfoOptions);
+				}
+				const initialSubtitleChoice = preferLocal ? null : await resolveInitialSubtitle(result, item, initialSubtitleIndex, settings, startingAudio);
 				if (initialSubtitleChoice?.isBurnIn) {
 					let bakedIn = initialSubtitleChoice.index === initialSubtitleIndex;
 					if (!bakedIn) {
@@ -1040,7 +1060,6 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				setPlayMethod(result.playMethod);
 				setIsHdrContent(isHdrOutput(result.mediaSource, result.playMethod === playback.PlayMethod.Transcode));
 				setMediaSourceId(result.mediaSourceId);
-				setLocalSubtitlePlayback({itemId: item.Id, sourceId: result.mediaSourceId});
 				liveRecovery?.tuned();
 				setVideoDisplayAspectRatio(getVideoDisplayAspectRatio(result.mediaSource));
 				playSessionRef.current = result.playSessionId;
@@ -1172,6 +1191,9 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				// Waiting on the subtitles can outlast this item, and whatever replaced it owns
 				// the player now.
 				if (cancelled) return;
+				// Start local restoration only after initial server-track loading has
+				// settled; a slow server ASS/SRT request must not overwrite it later.
+				setLocalSubtitlePlayback({itemId: item.Id, sourceId: result.mediaSourceId});
 
 				let displayTitle = item.Name;
 				let displaySubtitle = '';
@@ -2545,14 +2567,25 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	const handleOpenLocalSubtitles = useCallback(() => openModal('localSubtitles'), [openModal]);
 
 	const loadLocalSubtitle = useCallback(async content => {
+		if (content.restore && localSubtitleUserChoiceRef.current) return;
 		if (!parseSubtitleText(content.text).length) throw new Error('字幕没有有效时间轴，请检查内容或编码。');
 		const current = ++assInitGenRef.current;
+		let offset = content.offsetSeconds || 0;
+		if (content.local) {
+			const saved = await localSubtitlePreference({...content.local, action: 'save', select: true});
+			if (current !== assInitGenRef.current || (content.restore && localSubtitleUserChoiceRef.current)) return;
+			offset = saved.track?.offsetSeconds || 0;
+		}
+		localSubtitleUserChoiceRef.current = false;
+		subtitleOffsetRef.current = offset; setSubtitleOffset(offset);
+		localSubtitleSaveGenRef.current++;
+		setLocalSubtitleSaveMessage(content.local ? '已记住此字幕及对齐' : '');
 		pgsInitGenRef.current++;
 		disposePgsRenderer(pgsRendererRef.current); pgsRendererRef.current = null; pgsInitRef.current = null;
 		disposeAssRenderer(assRendererRef.current); assRendererRef.current = null;
 		clearAssCanvas(assCanvasRef.current); showHostSubtitle(videoRef.current, -1);
 		setSubtitleTrackEvents(null); setCurrentSubtitleText(null); clearSubtitleFetch();
-		localSubtitleRef.current = content;
+		localSubtitleRef.current = {...content, offsetSeconds: offset, restore: false};
 		setSubtitleStreams(previous => [...previous.filter(s => !s.isLocal), {index: -2, codec: content.format === 'ass' ? 'ass' : 'srt', displayTitle: '本地：' + content.name, isLocal: true, isExternal: true, isTextBased: true}]);
 		setSelectedSubtitleIndex(-2);
 		playback.updateCurrentSession({subtitleStreamIndex: -1});
@@ -2610,6 +2643,13 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 
 	const applySubtitleSelection = useCallback(async (index, streamList = subtitleStreams, shouldClose = true) => {
 		if (index === -2 && localSubtitleRef.current) { await loadLocalSubtitle(localSubtitleRef.current); return; }
+		localSubtitleUserChoiceRef.current = true;
+		localSubtitleSaveGenRef.current++;
+		setLocalSubtitleSaveMessage('');
+		if (mediaSourceId) localSubtitlePreference({itemKey: localSubtitleItemKey(item, mediaSourceId, getServerUrl()), action: 'save', enabled: false}).catch(() => {});
+		if (localSubtitleRef.current?.local) {
+			subtitleOffsetRef.current = 0; setSubtitleOffset(0);
+		}
 		playback.updateCurrentSession({subtitleStreamIndex: index});
 		clearSubtitleFetch();
 
@@ -2680,7 +2720,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		if (shouldClose) {
 			closeModal();
 		}
-	}, [item, subtitleStreams, closeModal, settings.enablePgsRendering, initAssRendererForStream, initPgsRendererForStream, loadTextTrack, reloadWithSubtitleIndex, releaseSecondaryIfPrimary, clearSubtitleFetch, loadLocalSubtitle]);
+	}, [item, mediaSourceId, subtitleStreams, closeModal, settings.enablePgsRendering, initAssRendererForStream, initPgsRendererForStream, loadTextTrack, reloadWithSubtitleIndex, releaseSecondaryIfPrimary, clearSubtitleFetch, loadLocalSubtitle]);
 
 	const handleOpenRemoteSubtitleSearch = useCallback(async () => {
 		if (!item?.Id) return;
@@ -3058,7 +3098,17 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		subtitleOffsetRef.current = newOffset;
 		setSubtitleOffset(newOffset);
 		if (pgsRendererRef.current) pgsRendererRef.current.timeOffset = -newOffset;
-	}, []);
+		if (assRendererRef.current) setAssTime(assRendererRef.current, (videoRef.current?.currentTime || 0) - newOffset);
+		const content = localSubtitleRef.current;
+		if (selectedSubtitleIndex === -2 && content?.local) {
+			content.offsetSeconds = newOffset;
+			const generation = ++localSubtitleSaveGenRef.current;
+			setLocalSubtitleSaveMessage('正在保存对齐…');
+			localSubtitlePreference({...content.local, action: 'save', offsetSeconds: newOffset}).then(() => {
+				if (generation === localSubtitleSaveGenRef.current) setLocalSubtitleSaveMessage('已记住此字幕对齐');
+			}).catch(() => { if (generation === localSubtitleSaveGenRef.current) setLocalSubtitleSaveMessage('对齐保存失败，请再调整一次重试'); });
+		}
+	}, [selectedSubtitleIndex]);
 
 	const stopPropagation = useCallback((e) => {
 		e.stopPropagation();
@@ -3515,7 +3565,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				/>
 			)}
 
-			{mediaSourceId && localSubtitlePlayback?.itemId === item.Id && localSubtitlePlayback.sourceId === mediaSourceId && !error && !isAudioMode && <LocalSubtitlePanel item={item} mediaSourceId={mediaSourceId} serverUrl={getServerUrl()} visible={activeModal === 'localSubtitles'} onRequestOpen={handleOpenLocalSubtitles} onLoad={loadLocalSubtitle} onClose={closeModal} />}
+			{mediaSourceId && localSubtitlePlayback?.itemId === item.Id && localSubtitlePlayback.sourceId === mediaSourceId && !error && !isAudioMode && <LocalSubtitlePanel item={item} mediaSourceId={mediaSourceId} serverUrl={getServerUrl()} visible={activeModal === 'localSubtitles'} allowRestore={initialSubtitleIndex == null || initialSubtitleIndex === -2} onRequestOpen={handleOpenLocalSubtitles} onLoad={loadLocalSubtitle} onClose={closeModal} />}
 
 			{/* Custom Subtitle Overlay - webOS doesn't support native <track> elements */}
 			{!isLoading && !error && !isAudioMode && (
@@ -3624,6 +3674,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				chapters={chapters}
 				currentTime={currentTime}
 				subtitleOffset={subtitleOffset}
+				localSubtitleSaveMessage={selectedSubtitleIndex === -2 ? localSubtitleSaveMessage : ''}
 				subtitleTrackEvents={subtitleTrackEvents}
 				handleControlButtonClick={handleControlButtonClick}
 				handleProgressClick={handleProgressClick}

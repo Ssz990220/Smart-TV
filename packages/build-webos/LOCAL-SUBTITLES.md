@@ -1,4 +1,4 @@
-# Standalone TV subtitles (webOS 3.0.4 personal fork)
+# Standalone TV subtitles (webOS 3.0.5 personal fork)
 
 The TV fetches and renders these subtitles without an Emby/Jellyfin subtitle
 provider, subtitle-write permission, or server-side video transcoding.
@@ -25,6 +25,13 @@ The application ID remains `org.moonfin.webos`.
 6. Imported subtitles appear as a local track. Choose None to disable, or choose
    the local track again to re-enable. Existing offset/appearance controls apply;
    ASS retains its own styling through libass with the bundled Chinese fallback.
+7. Local choices and timing are now persistent. Replaying the same movie/media
+   version restores the last chosen local file, archive member, encoding and
+   offset. Each file/member has independent timing. Before a choice has been
+   saved, the latest upload/USB import takes priority over provider downloads.
+   Selecting None or a server track disables automatic local restoration until
+   a local file is explicitly chosen or a new upload is loaded. Timing is kept
+   when disabled. The offset panel shows whether saving succeeded.
 
 UTF-8 and UTF-16 BOMs are detected. Non-UTF-8 input defaults to GB18030; select
 Big5 explicitly when needed. Source format and source character encoding are
@@ -41,6 +48,10 @@ the application; it is not in the address or QR code. Browsers use a remembered
 cookie after TV approval. Only hashes of browser secrets are stored on disk.
 The portal is a LAN HTTP page and should only be used on a trusted local network.
 Use its clear-keys button to remove provider credentials.
+Selection/timing records are stored separately in `preferences.json` and survive
+normal app upgrades and service/TV restarts. They are scoped to the server, movie
+and media-source ID. Offsets can still finish saving after the HTTP session has
+closed. Deleted or evicted files have their preference records pruned.
 
 Uploads require an approved browser or the private TV control token, reject
 unrelated browser origins and Host headers, use generated storage IDs instead
@@ -88,3 +99,11 @@ upload and fixture-provider download. The final installed LG C5 build resumed
 the same video after update; its service started automatically with the subtitle
 panel closed, showed only plain addresses, and preserved the existing browser
 approval. Real provider credentials were not used.
+
+Version 3.0.5 is a build-only candidate at the user's request; it has not been
+installed or tested on the TV. Local tests cover saved selection/offset recovery
+after service restart, per-member archive timing, explicit disabling, deletion
+fallback, cached restoration with the panel closed, and cancellation after
+leaving the player. The player suppresses initial server subtitles for a saved
+local preference, including avoiding server subtitle burn-in, and restores local
+subtitles after initial server-track setup has settled.
