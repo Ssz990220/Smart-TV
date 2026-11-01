@@ -2,6 +2,7 @@
 
 import {resolvePanelType} from './panelType';
 import {detectWebOSVersion, platformSdkVersion} from './webosVersion';
+import {canRequestReceiverAudio, requestAudioOutputStatus} from './audioOutput';
 
 export {detectWebOSVersion};
 
@@ -27,14 +28,6 @@ const emptyDtsSupport = {mkv: false, mp4: false, ts: false, avi: false};
 const getActiveSoundOutput = (audioStatus = {}) =>
 	(audioStatus?.soundOutput || '').toString().toLowerCase().trim();
 
-// Lossless formats only survive over ARC or eARC to a receiver, and only while
-// the TV is bitstreaming. PCM means it decoded the track itself.
-const isLosslessPassthroughOutput = (audioStatus = {}) => {
-	if (!/arc/.test(getActiveSoundOutput(audioStatus))) return false;
-	const digital = (audioStatus?.soundOutputDigital || '').toString().toLowerCase();
-	return digital !== 'pcm';
-};
-
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const lunaRequest = async (service, method, parameters) => {
@@ -54,37 +47,21 @@ export const lunaRequest = async (service, method, parameters) => {
 	}
 };
 
-const queryAudioOutputStatus = () =>
-	lunaRequest('com.webos.service.avoutput', 'audio/getStatus');
-
-// The documented route to the sound path. com.webos.service.avoutput is not
-// public API and answers an empty object on current firmware, which read as
-// "no receiver" and quietly switched off every passthrough check.
-const querySoundSettings = async () => {
-	const result = await lunaRequest('com.webos.settingsservice', 'getSystemSettings', {
-		category: 'sound',
-		keys: ['soundOutput', 'digitalSoundOutput']
-	});
-	return result?.settings || {};
-};
-
 const getAudioOutputStatus = async () => {
+	let latest = {};
 	for (let attempt = 0; attempt < 4; attempt++) {
-		const [status, sound] = await Promise.all([queryAudioOutputStatus(), querySoundSettings()]);
-		const merged = {
-			...status,
-			soundOutput: status?.soundOutput || sound.soundOutput,
-			soundOutputDigital: status?.soundOutputDigital || sound.digitalSoundOutput
-		};
-		if (getActiveSoundOutput(merged)) return merged;
+		latest = await requestAudioOutputStatus(lunaRequest);
+		if (getActiveSoundOutput(latest) && latest.soundOutputDigital) return latest;
 		await delay(150);
 	}
-	return {};
+	return latest;
 };
 
 const applyAudioOutputPath = async (baseCaps) => {
 	const audioOutputStatus = await getAudioOutputStatus();
-	const receiverPassthrough = isLosslessPassthroughOutput(audioOutputStatus);
+	// A request policy, not proof of TrueHD/Atmos arriving at the receiver.
+	// A root decoder plugin may decode the delivered original track to PCM.
+	const receiverPassthrough = canRequestReceiverAudio(audioOutputStatus);
 
 	const dts = receiverPassthrough
 		? {mkv: true, mp4: true, ts: true, avi: false}
@@ -110,7 +87,7 @@ const applyPassthroughSettings = (caps, options = {}) => {
 		ac3: !!caps.ac3 && !!prefs.ac3Passthrough,
 		eac3: !!caps.eac3 && !!prefs.eac3Passthrough,
 		// The force toggle skips receiver detection for setups the TV misreports
-		truehd: !!prefs.forceTruehdPassthrough || (!!caps.truehd && passthroughAllowed && !!prefs.truehdPassthrough),
+		truehd: passthroughAllowed && (!!prefs.forceTruehdPassthrough || (!!caps.truehd && !!prefs.truehdPassthrough)),
 		dts: dtsSupport,
 		dtshd: !!caps.dtshd && passthroughAllowed && !!prefs.dtshdPassthrough
 	};

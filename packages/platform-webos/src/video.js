@@ -103,8 +103,8 @@ export const getSupportedAudioCodecs = (capabilities, container = '', passthroug
 		if (dtsOk && capabilities.dtshd) codecs.push('dts-hd', 'dtshd', 'dtsx');
 	}
 
-	const truehdOk = passthrough.forceTruehdPassthrough ||
-		(capabilities.truehd && passthroughAllowed && passthrough.truehdPassthrough);
+	const truehdOk = passthroughAllowed && (passthrough.forceTruehdPassthrough ||
+		(capabilities.truehd && passthrough.truehdPassthrough));
 	if (truehdOk) codecs.push('truehd', 'mlp');
 	if (capabilities.opus) codecs.push('opus');
 	codecs.push('vorbis', 'wma', 'amr', 'amrnb', 'amrwb');

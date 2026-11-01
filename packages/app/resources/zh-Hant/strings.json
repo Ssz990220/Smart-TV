@@ -811,5 +811,6 @@
     "Text Fill Color": "文字填滿顏色",
     "Queue is empty": "隊列為空",
     "Perfect match": "完美搭配",
-    "{count} downloads": "{count} 次下載"
+    "{count} downloads": "{count} 次下載",
+    "Request original TrueHD / Atmos audio even if capability detection fails. Actual output depends on the TV.": "即使能力偵測失敗，仍要求原始 TrueHD／Atmos 音軌。實際輸出格式取決於電視。"
 }

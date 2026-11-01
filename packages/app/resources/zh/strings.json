@@ -974,5 +974,6 @@
     "Text Fill Color": "文本填充颜色",
     "Queue is empty": "队列为空",
     "Perfect match": "完全匹配",
-    "{count} downloads": "{count} 次下载"
+    "{count} downloads": "{count} 次下载",
+    "Request original TrueHD / Atmos audio even if capability detection fails. Actual output depends on the TV.": "即使能力检测失败，也请求原始 TrueHD／Atmos 音轨。实际输出格式取决于电视。"
 }
