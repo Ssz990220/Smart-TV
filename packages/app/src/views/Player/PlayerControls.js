@@ -109,7 +109,7 @@ export const usePlayerButtons = ({
 				{id: 'channels', icon: <IconChannels />, label: $L('Channels'), action: 'channels'},
 				{id: 'guide', icon: <IconGuide />, label: $L('Guide'), action: 'guide'},
 				...(audioStreams.length > 1 ? [{id: 'audio', icon: <IconAudio />, label: $L('Audio'), action: 'audio'}] : []),
-				...((subtitleStreams.length > 0 || canDownloadRemoteSubtitles) ? [{id: 'subtitles', icon: (selectedSubtitleIndex >= 0 ? <IconSubtitle /> : <IconSubtitleOff />), label: $L('Subtitles'), action: 'subtitle'}] : []),
+				...((subtitleStreams.length > 0 || canDownloadRemoteSubtitles) ? [{id: 'subtitles', icon: (selectedSubtitleIndex !== -1 && selectedSubtitleIndex != null ? <IconSubtitle /> : <IconSubtitleOff />), label: $L('Subtitles'), action: 'subtitle'}] : []),
 				{id: 'quality', icon: <IconQuality />, label: $L('Playback Quality'), action: 'quality'},
 				{id: 'zoom', icon: <IconZoom />, label: $L('Zoom').concat(` (${zoomModeLabel})`), action: 'zoom', active: zoomModeKey !== 'fit'},
 				{id: 'sleep', icon: <IconSleep />, label: $L('Sleep timer'), action: 'sleep', active: sleepMinutes != null},
@@ -128,7 +128,7 @@ export const usePlayerButtons = ({
 			...(chapters.length > 0 ? [{id: 'chapters', icon: <IconChapters />, label: $L('Chapters'), action: 'chapter'}] : []),
 			// Only an episode has a season to browse, so a movie never gets this button.
 			...(canBrowseEpisodes ? [{id: 'episodes', icon: <IconEpisodes />, label: $L('Episodes'), action: 'episodes'}] : []),
-			...((subtitleStreams.length > 0 || canDownloadRemoteSubtitles) ? [{id: 'subtitles', icon: (selectedSubtitleIndex >= 0 ? <IconSubtitle /> : <IconSubtitleOff />), label: $L('Subtitles'), action: 'subtitle'}] : []),
+			...((subtitleStreams.length > 0 || canDownloadRemoteSubtitles) ? [{id: 'subtitles', icon: (selectedSubtitleIndex !== -1 && selectedSubtitleIndex != null ? <IconSubtitle /> : <IconSubtitleOff />), label: $L('Subtitles'), action: 'subtitle'}] : []),
 			...(audioStreams.length > 1 ? [{id: 'audio', icon: <IconAudio />, label: $L('Audio'), action: 'audio'}] : []),
 			// Core calls this castAndCrew and keeps cast for Chromecast, so hiding one there
 			// must not take the other away here.
@@ -216,6 +216,7 @@ const PlayerControls = ({
 	handleOpenSubtitleOffset,
 	handleOpenSubtitleSettings,
 	handleOpenRemoteSubtitleSearch,
+	handleOpenLocalSubtitles,
 	handleSelectRemoteSubtitle,
 	canDownloadRemoteSubtitles,
 	isSearchingRemoteSubtitles,
@@ -586,6 +587,7 @@ const PlayerControls = ({
 							<TrackDivider />
 							<TrackOptionRow label={$L('Offset')} detail={offsetLabel(subtitleOffset)} spotlightId="btn-subtitle-offset" onClick={handleOpenSubtitleOffset} />
 							<TrackOptionRow label={$L('Appearance')} spotlightId="btn-subtitle-appearance" onClick={handleOpenSubtitleSettings} />
+							{handleOpenLocalSubtitles && <TrackOptionRow label="电视在线字幕／本地导入" detail="ASSRT · OpenSubtitles · SubHD · 字幕库" spotlightId="btn-local-subtitles" onClick={handleOpenLocalSubtitles} />}
 							{canDownloadRemoteSubtitles && (
 								<TrackOptionRow
 									label={$L('Download subtitles...')}

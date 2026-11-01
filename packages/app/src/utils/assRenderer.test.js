@@ -1,5 +1,5 @@
 import SubtitlesOctopus from 'libass-wasm';
-import {initAssCanvasRenderer, disposeAssRenderer} from './assRenderer';
+import {initAssCanvasRenderer, initAssCanvasContentRenderer, disposeAssRenderer} from './assRenderer';
 
 jest.mock('libass-wasm', () => jest.fn());
 
@@ -16,4 +16,13 @@ test('ASS receives the offline CJK font while retaining embedded fonts and the t
 	}));
 	disposeAssRenderer(view);
 	expect(view.dispose).toHaveBeenCalledTimes(1);
+});
+
+
+test('local ASS is passed as content and does not need a subtitle server URL', async () => {
+	SubtitlesOctopus.mockImplementation(() => ({dispose: jest.fn()}));
+	const text = '[Script Info]\nTitle: Original local test';
+	await initAssCanvasContentRenderer({}, text);
+	expect(SubtitlesOctopus).toHaveBeenCalledWith(expect.objectContaining({subContent: text, fonts: [], fallbackFont: 'NotoSansCJKsc-Regular.otf'}));
+	expect(SubtitlesOctopus.mock.calls[0][0].subUrl).toBeUndefined();
 });

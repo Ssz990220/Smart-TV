@@ -1,3 +1,6 @@
+import LocalSubtitlePanel from './LocalSubtitlePanel';
+import {escapeLocalSubtitleText} from '../../utils/localSubtitleFiles';
+import {parseSubtitleText} from '../../utils/subtitleText';
 import {useState, useEffect, useCallback, useRef, useMemo} from 'react';
 import Spotlight from '@enact/spotlight';
 import Button from '@enact/sandstone/Button';
@@ -17,7 +20,7 @@ import useSkipFailedTrack from './audio/useSkipFailedTrack';
 import {handleAudioFocusKey, exitAudioPanel, nextAudioFocusRow, focusAudioRow, forgetDockFocus} from './audio/audioFocus';
 import {detectPlatformVersion, getH264FallbackProfile} from '../../services/deviceProfile';
 import {initPgsRenderer, initPgsInBandRenderer, disposePgsRenderer} from '../../utils/pgsRenderer';
-import {supportsAssRenderer, initAssCanvasRenderer, disposeAssRenderer, setAssTime, clearAssCanvas} from '../../utils/assRenderer';
+import {supportsAssRenderer, initAssCanvasRenderer, initAssCanvasContentRenderer, disposeAssRenderer, setAssTime, clearAssCanvas} from '../../utils/assRenderer';
 import {waitForAssReady} from '../../utils/assRendererReady';
 import {
 	initPlayerPlatform,
@@ -323,6 +326,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	// reader behind the playhead.
 	const pgsInitRef = useRef(null);
 	const assRendererRef = useRef(null);
+	const localSubtitleRef = useRef(null);
 	const assCanvasRef = useRef(null);
 	// Bumped by every renderer start and teardown, so a start that finishes after a
 	// newer one, or after the player moved on, throws its renderer away.
@@ -569,6 +573,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 			// Canvas mode (not video-auto-sync): we position the overlay ourselves to
 			// the video's display rect so subtitles stay aligned in every zoom mode (#235).
 			const renderer = await initAssCanvasRenderer(assCanvasRef.current, assUrl, assFontsUrl, (err) => {
+				if (!isCurrent()) return;
 				console.error('[Player] ASS renderer error, falling back to text', err);
 				disposeAssRenderer(assRendererRef.current);
 				assRendererRef.current = null;
@@ -918,6 +923,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 			setSubtitleTrackEvents(null);
 			setCurrentSubtitleText(null);
 			setSelectedSubtitleIndex(-1);
+			localSubtitleRef.current = null;
 			clearSubtitleFetch();
 			prepareSecondaryForItem(item.Id);
 			setVideoDisplayAspectRatio(null);
@@ -2533,6 +2539,53 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		openModal('secondarySubtitleSettings', true);
 	}, [openModal]);
 
+	const handleOpenLocalSubtitles = useCallback(() => openModal('localSubtitles'), [openModal]);
+
+	const loadLocalSubtitle = useCallback(async content => {
+		if (!parseSubtitleText(content.text).length) throw new Error('字幕没有有效时间轴，请检查内容或编码。');
+		const current = ++assInitGenRef.current;
+		pgsInitGenRef.current++;
+		disposePgsRenderer(pgsRendererRef.current); pgsRendererRef.current = null; pgsInitRef.current = null;
+		disposeAssRenderer(assRendererRef.current); assRendererRef.current = null;
+		clearAssCanvas(assCanvasRef.current); showHostSubtitle(videoRef.current, -1);
+		setSubtitleTrackEvents(null); setCurrentSubtitleText(null); clearSubtitleFetch();
+		localSubtitleRef.current = content;
+		setSubtitleStreams(previous => [...previous.filter(s => !s.isLocal), {index: -2, codec: content.format === 'ass' ? 'ass' : 'srt', displayTitle: '本地：' + content.name, isLocal: true, isExternal: true, isTextBased: true}]);
+		setSelectedSubtitleIndex(-2);
+		playback.updateCurrentSession({subtitleStreamIndex: -1});
+		const plain = () => {
+			if (current !== assInitGenRef.current) return;
+			const events = parseSubtitleText(content.text).map(e => ({...e, Text: escapeLocalSubtitleText(e.Text)}));
+			if (!events.length) throw new Error('字幕没有有效时间轴，请检查文件内容或编码。');
+			setSubtitleTrackEvents(events);
+		};
+		if (content.format === 'ass' && supportsAssRenderer()) {
+			const view = await initAssCanvasContentRenderer(assCanvasRef.current, content.text, () => {
+				if (current !== assInitGenRef.current) return;
+				disposeAssRenderer(assRendererRef.current); assRendererRef.current = null; clearAssCanvas(assCanvasRef.current);
+				try { plain(); } catch { /* no valid text fallback */ }
+			});
+			if (current !== assInitGenRef.current) { disposeAssRenderer(view); return; }
+			if (view) {
+				assRendererRef.current = view; applyVideoAndAssGeometry();
+				setAssTime(view, (videoRef.current?.currentTime || 0) - subtitleOffsetRef.current);
+				const ready = await trackSubtitleFetch(waitForAssReady(view, 15000, () => current === assInitGenRef.current && assRendererRef.current === view));
+				if (current !== assInitGenRef.current) return;
+				if (ready) setAssTime(view, (videoRef.current?.currentTime || 0) - subtitleOffsetRef.current);
+				else { disposeAssRenderer(view); assRendererRef.current = null; clearAssCanvas(assCanvasRef.current); plain(); }
+			} else plain();
+		} else plain();
+		closeModal();
+	}, [applyVideoAndAssGeometry, clearSubtitleFetch, trackSubtitleFetch, closeModal]);
+
+	// Fresh imports and offset changes should update captions even while paused.
+	useEffect(() => {
+		if (!localSubtitleRef.current || selectedSubtitleIndex !== -2 || !subtitleTrackEvents) return;
+		const ticks = ((videoRef.current?.currentTime || 0) - subtitleOffset) * 10000000;
+		const words = subtitleTrackEvents.filter(e => ticks >= e.StartPositionTicks && ticks <= e.EndPositionTicks).map(e => e.Text);
+		setCurrentSubtitleText(words.length ? words.join('\n') : null);
+	}, [subtitleTrackEvents, selectedSubtitleIndex, subtitleOffset]);
+
 	// dvd and dvb bitmaps have no client renderer, the server burns them into
 	// the video, which needs a stream reload whenever one is picked or dropped
 	const reloadWithSubtitleIndex = useCallback(async (subIndex) => {
@@ -2553,6 +2606,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	}, []);
 
 	const applySubtitleSelection = useCallback(async (index, streamList = subtitleStreams, shouldClose = true) => {
+		if (index === -2 && localSubtitleRef.current) { await loadLocalSubtitle(localSubtitleRef.current); return; }
 		playback.updateCurrentSession({subtitleStreamIndex: index});
 		clearSubtitleFetch();
 
@@ -2623,7 +2677,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		if (shouldClose) {
 			closeModal();
 		}
-	}, [item, subtitleStreams, closeModal, settings.enablePgsRendering, initAssRendererForStream, initPgsRendererForStream, loadTextTrack, reloadWithSubtitleIndex, releaseSecondaryIfPrimary, clearSubtitleFetch]);
+	}, [item, subtitleStreams, closeModal, settings.enablePgsRendering, initAssRendererForStream, initPgsRendererForStream, loadTextTrack, reloadWithSubtitleIndex, releaseSecondaryIfPrimary, clearSubtitleFetch, loadLocalSubtitle]);
 
 	const handleOpenRemoteSubtitleSearch = useCallback(async () => {
 		if (!item?.Id) return;
@@ -3458,6 +3512,8 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				/>
 			)}
 
+			{activeModal === 'localSubtitles' && <LocalSubtitlePanel item={item} mediaSourceId={mediaSourceId} serverUrl={getServerUrl()} onLoad={loadLocalSubtitle} onClose={closeModal} />}
+
 			{/* Custom Subtitle Overlay - webOS doesn't support native <track> elements */}
 			{!isLoading && !error && !isAudioMode && (
 				<SubtitleTextOverlay
@@ -3582,6 +3638,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				handleSelectCastMember={handleSelectCastMember}
 				handleOpenSubtitleOffset={handleOpenSubtitleOffset}
 				handleOpenSubtitleSettings={handleOpenSubtitleSettings}
+				handleOpenLocalSubtitles={handleOpenLocalSubtitles}
 				handleOpenRemoteSubtitleSearch={handleOpenRemoteSubtitleSearch}
 				handleSelectRemoteSubtitle={handleSelectRemoteSubtitle}
 				canDownloadRemoteSubtitles={!isAudioMode && Boolean(item?.Id)}

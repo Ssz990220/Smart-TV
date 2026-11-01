@@ -1,4 +1,4 @@
-> Personal fork: the webOS 3.0.1 build includes an offline Chinese font fix for the UI, text subtitles, and ASS/SSA. See [CJK font fix](packages/build-webos/CJK-FONTS.md). This is not an official Moonfin release.
+> Personal fork: webOS 3.0.3 adds standalone ASSRT/OpenSubtitles, paired local subtitle import, USB import and offline Chinese fonts. See [TV subtitles](packages/build-webos/LOCAL-SUBTITLES.md). This is not an official Moonfin release.
 
 <h1 align="center">Moonfin for Smart-TVs</h1>
 <h3 align="center">Premium Jellyfin, Emby and Plex client for webOS and Tizen TVs</h3>

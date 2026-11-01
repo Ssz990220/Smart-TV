@@ -226,7 +226,11 @@ try {
 	// store rejects Let's Encrypt; see packages/build-webos/service/service.js).
 	// `webos-service` is provided by the TV firmware at runtime, so the service
 	// dir is packaged as-is; no node_modules to install.
-	const SERVICE_DIR = path.join(__dirname, 'service');
+	const SERVICE_SOURCE = path.join(__dirname, 'service');
+	const SERVICE_DIR = path.join(ROOT_DIR, '.webos-service-package');
+	if (fs.existsSync(SERVICE_DIR)) fs.rmSync(SERVICE_DIR, {recursive: true, force: true});
+	copyDirRecursive(SERVICE_SOURCE, SERVICE_DIR);
+	fs.rmSync(path.join(SERVICE_DIR, 'test'), {recursive: true, force: true});
 	let packageServiceArg = '';
 	if (fs.existsSync(path.join(SERVICE_DIR, 'services.json'))) {
 		packageServiceArg = ` ${SERVICE_DIR}`;
@@ -236,6 +240,7 @@ try {
 	}
 
 	run(`npx ares-package ${DIST_DIR}${packageServiceArg} -o ${ROOT_DIR} --no-minify`);
+	fs.rmSync(SERVICE_DIR, {recursive: true, force: true});
 
 	const generatedIpk = path.join(ROOT_DIR, `org.moonfin.webos_${appPkg.version}_all.ipk`);
 	const finalIpk = path.join(ROOT_DIR, `Moonfin_webOS_v${appPkg.version}.ipk`);

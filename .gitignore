@@ -37,3 +37,6 @@ packages/build-xbox/probe/media
 .DS_Store
 .vscode
 *.log
+
+# Generated production-only service staging
+.webos-service-package/

@@ -67,6 +67,13 @@ export const initAssCanvasRenderer = async (canvasElement, subtitleUrl, fontsUrl
 	return createRenderer({canvas: canvasElement, subUrl: subtitleUrl, fonts: fontsUrl}, onError);
 };
 
+export const initAssCanvasContentRenderer = async (canvasElement, subtitleContent, onError) => {
+	if (!canvasElement || !subtitleContent) return null;
+	canvasElement.width = window.innerWidth || 1920;
+	canvasElement.height = window.innerHeight || 1080;
+	return createRenderer({canvas: canvasElement, subContent: subtitleContent, fonts: []}, onError);
+};
+
 export const disposeAssRenderer = (renderer) => {
 	if (renderer?.dispose) {
 		try {

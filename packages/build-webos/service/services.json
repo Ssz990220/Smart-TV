@@ -10,6 +10,16 @@
 					"name": "fetch",
 					"description": "Fetch a URL and return status, headers and body",
 					"public": false
+				},
+				{
+					"name": "subtitlesStart",
+					"description": "Start a private local subtitle search/import session",
+					"public": false
+				},
+				{
+					"name": "subtitlesStop",
+					"description": "Close the local subtitle import session",
+					"public": false
 				}
 			]
 		}

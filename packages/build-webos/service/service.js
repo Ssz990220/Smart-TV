@@ -163,3 +163,8 @@ service.register('fetch', function (message) {
 		message.respond({returnValue: false, errorText: e.message, errorClass: 'network'});
 	}
 });
+
+// The standalone subtitle feature uses the modern runtime available on webOS 25.
+if (parseInt(process.versions.node.split('.')[0], 10) >= 12) {
+	require('./local-subtitles').register(service, {ca: CA_LIST});
+}
