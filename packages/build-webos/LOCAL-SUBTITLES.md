@@ -100,10 +100,16 @@ the same video after update; its service started automatically with the subtitle
 panel closed, showed only plain addresses, and preserved the existing browser
 approval. Real provider credentials were not used.
 
-Version 3.0.5 is a build-only candidate at the user's request; it has not been
-installed or tested on the TV. Local tests cover saved selection/offset recovery
+Version 3.0.5 was installed after the user authorized replacement. Its 59 app
+tests and 12 service integration tests passed. Local tests cover selection/offset recovery
 after service restart, per-member archive timing, explicit disabling, deletion
 fallback, cached restoration with the panel closed, and cancellation after
 leaving the player. The player suppresses initial server subtitles for a saved
 local preference, including avoiding server subtitle burn-in, and restores local
 subtitles after initial server-track setup has settled.
+
+Actual LG C5 verification for 3.0.5: the existing local subtitle was selected
+automatically. A temporary manual offset persisted to disk and was restored
+with the same local track after leaving and reopening the video. The original
+alignment was restored after testing. Existing cached subtitles and browser
+approval were preserved. No test files were added to the TV.
