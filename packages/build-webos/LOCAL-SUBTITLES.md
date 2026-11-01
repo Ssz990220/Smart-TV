@@ -62,3 +62,12 @@ Real ASSRT/OpenSubtitles account downloads still require user-owned API keys.
 Fixture API tests do not prove account quota, availability or a specific movie's
 subtitle match. SubHD/Zimuku availability and website verification remain external.
 The standalone service requires Node 12+; the target C5 webOS 25 uses Node 16.
+
+Target-device validation on LG C5 / webOS 25 (Node 16): the installed 3.0.3
+service started, authenticated LAN upload/readback passed, and its cache used
+0700/0600 permissions. Original bilingual SRT text rendered in the real player;
+original ASS rendered through libass with nonempty canvas pixels and the user
+confirmed Chinese glyphs displayed correctly. ZIP/RAR/7z imports all completed
+using the actual TV archive worker. USB scanning succeeded with no USB subtitles
+attached; importing a physical USB file was not exercised. Test imports were
+removed and the temporary subtitle track/session disabled after verification.
