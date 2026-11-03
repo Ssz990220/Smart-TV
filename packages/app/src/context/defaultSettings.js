@@ -69,6 +69,7 @@ export const defaultSettings = {
 	assDirectPlay: true,
 	waitForAssSubtitles: false,
 	audioPassthroughMode: 'auto',
+	webosLocalSurround: false,
 	maxAudioChannels: 0,
 	transcodeAudioCodecs: [],
 	downmixToStereo: false,

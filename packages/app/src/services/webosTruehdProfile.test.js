@@ -1,5 +1,5 @@
 import {clearCapabilitiesCache, getJellyfinDeviceProfile} from '../../../platform-webos/src/deviceProfile';
-import {getSupportedAudioCodecs} from '../../../platform-webos/src/video';
+import {getSupportedAudioCodecs, isAudioStreamPlayable} from '../../../platform-webos/src/video';
 
 let mockDigitalOutput = 'auto';
 
@@ -75,4 +75,15 @@ describe('TrueHD original-track request profile', () => {
 		mockDigitalOutput = 'passThrough';
 		expect(mkvCodecs(await getJellyfinDeviceProfile())).toContain('truehd');
 	});
+	it('requests original MKV DTS and TrueHD independently of receiver passthrough when opted in', async () => {
+		mockDigitalOutput = 'pcm';
+		const passthroughSettings = {passthroughEnabled: false, webosLocalSurround: true};
+		const profile = await getJellyfinDeviceProfile({passthroughSettings});
+		expect(mkvCodecs(profile)).toEqual(expect.arrayContaining(['dts', 'dtshd', 'truehd']));
+		expect(profile.DirectPlayProfiles.find((p) => p.Type === 'Video' && p.Container.split(',').includes('mp4')).AudioCodec).not.toContain('truehd');
+		expect(isAudioStreamPlayable({Codec: 'truehd'}, {webosVersion: 25}, passthroughSettings, 'mkv')).toBe(true);
+		expect(isAudioStreamPlayable({Codec: 'truehd'}, {webosVersion: 25}, passthroughSettings, 'mp4')).toBe(false);
+		expect(isAudioStreamPlayable({Codec: 'dts'}, {webosVersion: 24}, passthroughSettings, 'mkv')).toBe(false);
+	});
+
 });

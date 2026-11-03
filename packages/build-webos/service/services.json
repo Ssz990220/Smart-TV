@@ -12,6 +12,16 @@
 					"public": false
 				},
 				{
+					"name": "mkvSeekStart",
+					"description": "Prepare a private loopback stream with an MKV seek index",
+					"public": false
+				},
+				{
+					"name": "mkvSeekStop",
+					"description": "Close the private MKV stream",
+					"public": false
+				},
+				{
 					"name": "subtitlesStart",
 					"description": "Start a private local subtitle search/import session",
 					"public": false

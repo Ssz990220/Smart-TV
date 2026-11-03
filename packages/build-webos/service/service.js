@@ -167,4 +167,5 @@ service.register('fetch', function (message) {
 // The standalone subtitle feature uses the modern runtime available on webOS 25.
 if (parseInt(process.versions.node.split('.')[0], 10) >= 12) {
 	require('./local-subtitles').register(service, {ca: CA_LIST});
+	require('./mkv-seek').register(service, SECURE_CONTEXT ? {secureContext: SECURE_CONTEXT} : {ca: CA_LIST});
 }

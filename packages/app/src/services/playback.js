@@ -150,6 +150,7 @@ const getPlaybackAudioSettings = async (options = {}, preloadedSettings = null) 
 	};
 	return {
 		passthroughEnabled: !off,
+		webosLocalSurround: stored.downmixToStereo !== true && stored.webosLocalSurround === true,
 		ac3Passthrough: claim(options.ac3Passthrough, stored.ac3Passthrough, DEFAULT_PASSTHROUGH_SETTINGS.ac3Passthrough),
 		eac3Passthrough: claim(options.eac3Passthrough, stored.eac3Passthrough, DEFAULT_PASSTHROUGH_SETTINGS.eac3Passthrough),
 		dtsPassthrough: claim(options.dtsPassthrough, stored.dtsPassthrough, DEFAULT_PASSTHROUGH_SETTINGS.dtsPassthrough),
@@ -225,7 +226,7 @@ const selectMediaSource = (mediaSources, capabilities, options, passthroughSetti
 
 		// Score based on the best COMPATIBLE audio stream, not just the first one
 		const sourceAudioStreams = source.MediaStreams?.filter(s => s.Type === 'Audio') || [];
-		const compatibleAudio = sourceAudioStreams.filter(s => isAudioStreamPlayable(s, capabilities, passthroughSettings));
+		const compatibleAudio = sourceAudioStreams.filter(s => isAudioStreamPlayable(s, capabilities, passthroughSettings, source.Container || ''));
 		if (compatibleAudio.length > 0) {
 			const bestAudio = compatibleAudio.reduce((best, s) => {
 				let trackScore = 0;
@@ -269,7 +270,7 @@ const determinePlayMethod = (mediaSource, capabilities, options = {}, passthroug
 		// A profile can name a container without naming its codecs, so the server
 		// offers DirectPlay for things this device cant decode. DirectStream only
 		// swaps the container, so neither is safe until the codec is checked.
-		if (!isAudioStreamPlayable(audioStream, capabilities, passthroughSettings)) return PlayMethod.Transcode;
+		if (!isAudioStreamPlayable(audioStream, capabilities, passthroughSettings, mediaSource.Container || '')) return PlayMethod.Transcode;
 		if (mediaSource.SupportsDirectPlay) return PlayMethod.DirectPlay;
 		if (mediaSource.SupportsDirectStream) return PlayMethod.DirectStream;
 		return PlayMethod.Transcode;
@@ -716,7 +717,7 @@ export const getPlaybackInfo = async (itemId, options = {}) => {
 	// sends to the server for conversion counts as unplayable, since with no track named the
 	// server can direct play it without ever checking the audio.
 	let audioStreamIndex = options.audioStreamIndex;
-	const playableAudio = (s) => isAudioStreamPlayable(s, capabilities, passthroughSettings)
+	const playableAudio = (s) => isAudioStreamPlayable(s, capabilities, passthroughSettings, mediaSource.Container || '')
 		&& !transcodesAudioCodec(storedSettings, s?.Codec);
 	if (audioStreamIndex == null && mediaSource.DefaultAudioStreamIndex != null) {
 		const defaultAudioStream = mediaSource.MediaStreams?.find(
@@ -1645,7 +1646,7 @@ export const canPlayAudioStreamNatively = async (stream, options = {}) => {
 	if (!stream) return false;
 	const capabilities = currentSession?.capabilities || await getDeviceCapabilities(options);
 	const passthroughSettings = await getPlaybackAudioSettings(options);
-	return isAudioStreamPlayable(stream, capabilities, passthroughSettings);
+	return isAudioStreamPlayable(stream, capabilities, passthroughSettings, currentSession?.mediaSource?.Container || '');
 };
 
 /** Update currentSession track indices without a full reload (native track switch). */

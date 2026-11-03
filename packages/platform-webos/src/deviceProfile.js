@@ -1,5 +1,6 @@
 // Device Profile Service - webOS hardware capability detection via Luna APIs
 
+import {canRequestLocalSurround, LOCAL_SURROUND_CODECS} from './localSurround';
 import {resolvePanelType} from './panelType';
 import {detectWebOSVersion, platformSdkVersion} from './webosVersion';
 import {canRequestReceiverAudio, requestAudioOutputStatus} from './audioOutput';
@@ -84,6 +85,7 @@ const applyPassthroughSettings = (caps, options = {}) => {
 
 	return {
 		...caps,
+		localSurroundMkv: canRequestLocalSurround(caps, prefs, 'mkv'),
 		ac3: !!caps.ac3 && !!prefs.ac3Passthrough,
 		eac3: !!caps.eac3 && !!prefs.eac3Passthrough,
 		// The force toggle skips receiver detection for setups the TV misreports
@@ -436,7 +438,8 @@ const buildMkvAudioCodecs = (caps) => {
 	if (caps.opus) mkvAudioCodecs.push('opus');
 	if (caps.flac) mkvAudioCodecs.push('flac');
 	if (caps.truehd) mkvAudioCodecs.push('truehd');
-	return mkvAudioCodecs;
+	if (caps.localSurroundMkv) mkvAudioCodecs.push(...LOCAL_SURROUND_CODECS);
+	return [...new Set(mkvAudioCodecs)];
 
 }
 
@@ -629,7 +632,7 @@ export const getJellyfinDeviceProfile = async (options = {}) => {
 	const directPlayProfiles = buildDirectPlayProfiles(caps);
 
 	const maxStreamingBitrate = 120_000_000;
-	const maxAudioChannels = caps.dolbyAtmos || caps.truehd || caps.dtshd ? '8' : '6';
+	const maxAudioChannels = caps.dolbyAtmos || caps.truehd || caps.dtshd || caps.localSurroundMkv ? '8' : '6';
 
 	// fMP4 preserves DV RPU metadata; MPEG-TS strips it. Use fMP4 on webOS 5+.
 	const hlsContainer = caps.nativeHlsFmp4 ? 'mp4' : 'ts';

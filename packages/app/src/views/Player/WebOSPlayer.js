@@ -12,7 +12,8 @@ import {getImageUrl, getLogoUrl} from '../../utils/helpers';
 import {transcodesAudioCodec} from '../../utils/deviceProfileTuning';
 import {api as jellyfinApi, createApiForServer, getServerUrl} from '../../services/jellyfinApi';
 import {getApiForItem} from '../../services/connectionPool';
-import {isVega} from '../../platform';
+import {isVega, isWebOS} from '../../platform';
+import {openMkvSeekStream} from '../../services/mkvSeek';
 import {isPlexUrl} from '../../utils/plexUrls';
 import AudioMode from './audio/AudioMode';
 import useAudioTransport from './audio/useAudioTransport';
@@ -300,6 +301,8 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	const scrubSettleTimerRef = useRef(null);
 	const isCleaningUpRef = useRef(false);
 	const isHandlingErrorRef = useRef(false);
+	const mkvSeekRef = useRef(null);
+	const mkvSeekBypassRef = useRef(null);
 	const sourceTransitionRef = useRef(false);
 	const transcodeRetryCountRef = useRef(0);
 	const forceHlsJsRef = useRef(false);
@@ -1554,7 +1557,6 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 
 		if (!video || !mediaUrl || isLoading || error) return;
 
-		console.log('[Player] Setting video src via ref:', mediaUrl);
 		console.log('[Player] PlayMethod:', playMethod, 'MimeType:', mimeType);
 
 		// autoplay must be re-set because hls.js path overrides it to false
@@ -1565,23 +1567,38 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		video.volume = 1;
 		video.removeAttribute('muted');
 
-		const setSourceAndPlay = () => {
+		let cancelled = false;
+		let seekStream = null;
+		const setSourceAndPlay = async () => {
+			const container = playback.getCurrentSession()?.mediaSource?.Container;
+			if (mkvSeekBypassRef.current !== mediaUrl && !isLiveTV && isWebOS()
+				&& playMethod === playback.PlayMethod.DirectPlay && /^mkv$/i.test(container || '')
+				&& mimeType !== 'application/x-mpegURL' && !mediaUrl.includes('.m3u8')
+				&& /^https?:\/\//i.test(mediaUrl)) {
+				seekStream = await openMkvSeekStream(mediaUrl);
+				if (cancelled) {
+					seekStream?.close();
+					return;
+				}
+				if (seekStream) mkvSeekRef.current = {mediaUrl, stream: seekStream};
+			}
+			const playUrl = seekStream?.url || mediaUrl;
 			console.log('[Player] Setting video source now');
 
 			destroyHlsPlayer();
 
-			let srcUrl = mediaUrl;
+			let srcUrl = playUrl;
 			const isHls = mimeType === 'application/x-mpegURL' || mediaUrl.includes('.m3u8');
 			const resumeTicks = pendingResumeTicksRef.current;
 			if (resumeTicks > 0 && !isHls && resumesAfterFirstFrame(playback.getCurrentSession()?.mediaSource)) {
 				// Where a seek made before the first frame shows never lands, the file is
 				// opened at its start and the resume waits for that frame.
 				video.addEventListener('loadeddata', () => {
-					if (video.src === mediaUrl && pendingResumeTicksRef.current > 0) video.currentTime = pendingResumeTicksRef.current / 10000000;
+					if (video.src === playUrl && pendingResumeTicksRef.current > 0) video.currentTime = pendingResumeTicksRef.current / 10000000;
 				}, {once: true});
 			} else if (resumeTicks > 0) {
 				const resumeSec = resumeTicks / 10000000;
-				srcUrl = mediaUrl + '#t=' + resumeSec;
+				srcUrl = playUrl + '#t=' + resumeSec;
 				console.log('[Player] Appending media fragment #t=' + resumeSec + ' for resume (' + resumeTicks + ' ticks)');
 			}
 
@@ -1800,6 +1817,11 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		}
 
 		return () => {
+			cancelled = true;
+			if (seekStream) {
+				if (mkvSeekRef.current?.stream === seekStream) mkvSeekRef.current = null;
+				seekStream.close();
+			}
 			if (startDelayTimer) {
 				clearTimeout(startDelayTimer);
 			}
@@ -2099,6 +2121,16 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	}, [onEnded, onPlayNext, nextEpisode, audioPlaylist, repeatMode, restartCurrent, getNextStep, settings.autoPlay, item, liveRecovery, shouldHoldForStillWatching]);
 
 	const handleError = useCallback(async () => {
+		const seekOverlay = mkvSeekRef.current;
+		if (!isCleaningUpRef.current && !isHandlingErrorRef.current && seekOverlay
+			&& videoRef.current?.src.split('#')[0] === seekOverlay.stream.url) {
+			mkvSeekBypassRef.current = seekOverlay.mediaUrl;
+			mkvSeekRef.current = null;
+			pendingResumeTicksRef.current ||= positionRef.current;
+			playbackStartTimedOutRef.current = false;
+			setSourceRevision(revision => revision + 1);
+			return;
+		}
 		const startFailure = playbackStartTimedOutRef.current && !isPaused;
 		// A channel that fails to open reads as paused too, so only the viewer's own pause holds a live error back.
 		const paused = isPaused || (!isLiveTV && videoRef.current?.paused);

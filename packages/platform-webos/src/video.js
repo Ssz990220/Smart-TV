@@ -2,6 +2,7 @@
 // Capability detection is handled by deviceProfile.js - this module focuses on
 // playback decisions, audio codec checks, and Luna hardware control.
 
+import {canRequestLocalSurround, LOCAL_SURROUND_CODECS} from './localSurround';
 import {videoRangeTypeOf} from '@moonfin/app/src/utils/videoRange';
 
 let lunaClient = null;
@@ -109,16 +110,18 @@ export const getSupportedAudioCodecs = (capabilities, container = '', passthroug
 	if (capabilities.opus) codecs.push('opus');
 	codecs.push('vorbis', 'wma', 'amr', 'amrnb', 'amrwb');
 
-	return codecs;
+	if (canRequestLocalSurround(capabilities, passthrough, container)) codecs.push(...LOCAL_SURROUND_CODECS);
+	return [...new Set(codecs)];
 };
 
 // WebOS handles it on its own i think
-export const isAudioStreamPlayable = (stream, capabilities, passthroughOptions = {}) => {
+export const isAudioStreamPlayable = (stream, capabilities, passthroughOptions = {}, container = '') => {
 	if (!stream) return false;
 	const codec = (stream.Codec || '').toLowerCase();
 	if (!codec) return true;
 	const supported = getSupportedAudioCodecs(capabilities, '', passthroughOptions);
-	return supported.includes(codec);
+	return supported.includes(codec) ||
+		(canRequestLocalSurround(capabilities, passthroughOptions, container) && LOCAL_SURROUND_CODECS.includes(codec));
 };
 
 /**
@@ -130,7 +133,7 @@ export const findCompatibleAudioStreamIndex = (mediaSource, capabilities, passth
 	if (!mediaSource?.MediaStreams) return -1;
 	const audioStreams = mediaSource.MediaStreams.filter(s => s.Type === 'Audio');
 	for (const stream of audioStreams) {
-		if (isAudioStreamPlayable(stream, capabilities, passthroughOptions)) {
+		if (isAudioStreamPlayable(stream, capabilities, passthroughOptions, mediaSource.Container || '')) {
 			return stream.Index;
 		}
 	}
